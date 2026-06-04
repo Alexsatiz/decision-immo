@@ -7,6 +7,13 @@ const MEUBLE_BONUS = 0.12;        // +12% loyer en meublé
 const ABATTEMENT_LMNP = 0.50;     // micro-BIC
 const ABATTEMENT_VIDE = 0.30;     // micro-foncier
 
+// Bonus annexes : impact sur loyer estimé et sur la valeur projetée
+const ANNEX_BONUS = {
+  cave:           { rent: 0.03, value: 0.03 },
+  parkingPrivate: { rent: 0.05, value: 0.06 },
+  parkingBox:     { rent: 0.07, value: 0.10 },
+};
+
 const fmtEUR  = n => isFinite(n) ? new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(n) : "—";
 const fmtEUR2 = n => isFinite(n) ? new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR",maximumFractionDigits:2}).format(n) : "—";
 const fmtPct  = (n,d=2) => isFinite(n) ? new Intl.NumberFormat("fr-FR",{style:"percent",minimumFractionDigits:d,maximumFractionDigits:d}).format(n/100) : "—";
@@ -40,6 +47,8 @@ function readInputs() {
       charges: num("b-charges"),
       taxe: num("b-taxe"),
       elevator: val("b-elevator") === "true",
+      cave: val("b-cave") === "true",
+      parking: val("b-parking"), // "none" | "private" | "box"
       dpe: val("b-dpe"),
       ges: val("b-ges"),
       coproLots: num("b-copro-lots"),
@@ -68,6 +77,15 @@ function readInputs() {
    ESTIMATION LOYER / PRIX MARCHÉ
    ============================================================ */
 
+function annexBonus(bien, kind) {
+  // kind = "rent" | "value" — retourne le multiplicateur (ex: 1.08)
+  let mult = 1;
+  if (bien.cave) mult *= 1 + ANNEX_BONUS.cave[kind];
+  if (bien.parking === "private") mult *= 1 + ANNEX_BONUS.parkingPrivate[kind];
+  else if (bien.parking === "box") mult *= 1 + ANNEX_BONUS.parkingBox[kind];
+  return mult;
+}
+
 function estimateMarketRent(bien) {
   const m = getMarket(bien.city, SELECTED_COMMUNE);
   if (!m || !bien.surface) return 0;
@@ -82,6 +100,8 @@ function estimateMarketRent(bien) {
   else if (bien.condition === "travaux") factor *= 0.85;
   // étage haut sans ascenseur
   if (bien.floor >= 3 && !bien.elevator) factor *= 0.97;
+  // bonus cave / parking
+  factor *= annexBonus(bien, "rent");
   const median = (m.rentM2[0] + m.rentM2[1]) / 2;
   return Math.round(median * factor * bien.surface);
 }
@@ -231,7 +251,10 @@ function buildProjection(a, horizonYears, growthPct) {
     flows.push(annualCF);
   }
 
-  const projectedValue = a.bien.price * Math.pow(1 + g, N);
+  // Base de valorisation : prix d'achat + bonus annexes (cave/parking)
+  // Les annexes augmentent la valeur intrinsèque du bien sans changer le prix payé.
+  const valueBase = a.bien.price * annexBonus(a.bien, "value");
+  const projectedValue = valueBase * Math.pow(1 + g, N);
   const balance = remainingBalance(amort, N);
   const sale = projectedValue - balance;
   flows[flows.length - 1] += sale;
@@ -476,6 +499,21 @@ function buildOptimisations(a) {
     });
   }
 
+  // Parking absent en zone tendue
+  const mForOpti = getMarket(b.city, SELECTED_COMMUNE);
+  if (b.parking === "none" && mForOpti && mForOpti.tension >= 4) {
+    opti.push({
+      title: "Acquérir une place de parking annexe",
+      text: `Pas de parking sur ce bien alors que ${b.city} est en forte tension. Une place louée séparément se vend 8 000–25 000 € selon secteur et génère 60–120 €/mois. Améliore l'attractivité locative et la revente.`
+    });
+  }
+  if (b.parking === "private") {
+    opti.push({
+      title: "Louer la place de parking séparément",
+      text: "En zone tendue, dissocier le bail logement et le bail parking peut être plus rentable (jusqu'à +30% sur le tarif parking). Vérifier le règlement de copro avant."
+    });
+  }
+
   // Négociation
   const m = getMarket(b.city, SELECTED_COMMUNE);
   if (m && b.surface > 0) {
@@ -560,6 +598,12 @@ function buildVerdict(a) {
   // Étage
   if (b.floor === 0) { score -= 4; neg.push("Rez-de-chaussée — décote revente"); }
   if (b.floor >= 3 && !b.elevator) { score -= 3; neu.push("Étage élevé sans ascenseur"); }
+
+  // Annexes (cave / parking) — valorisent à la revente et au loyer
+  if (b.cave) { score += 2; pos.push("Cave — bonus loyer et revente"); }
+  if (b.parking === "private") { score += 3; pos.push("Place de parking privative"); }
+  else if (b.parking === "box") { score += 5; pos.push("Box fermé — fort atout en zone tendue"); }
+  else if (b.parking === "none" && m && m.tension >= 4) { score -= 2; neu.push("Pas de parking en zone tendue"); }
 
   score = Math.max(0, Math.min(100, score));
 

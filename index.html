@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Décision Immo — Analyse de rentabilité en temps réel</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <span class="brand-name">Décision Immo</span>
+    </div>
+    <p class="header-tag">Saisissez un bien · obtenez un verdict d'investissement instantané</p>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ===================================================== -->
+  <!-- COLONNE GAUCHE : SAISIE                               -->
+  <!-- ===================================================== -->
+  <aside class="col-input">
+
+    <!-- BIEN -->
+    <section class="card">
+      <h2>① Bien immobilier</h2>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="b-city">Ville</label>
+          <div class="autocomplete">
+            <input type="text" id="b-city" placeholder="Tapez une commune française…" autocomplete="off" />
+            <div class="autocomplete-list" id="b-city-list"></div>
+          </div>
+          <span class="hint" id="city-hint"></span>
+        </div>
+        <div class="field">
+          <label for="b-district">Quartier (optionnel)</label>
+          <input type="text" id="b-district" placeholder="ex: La Pie, Joncs Marins…" />
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="field">
+          <label for="b-type">Type</label>
+          <select id="b-type">
+            <option value="Studio">Studio</option>
+            <option value="T1">T1</option>
+            <option value="T2" selected>T2</option>
+            <option value="T3">T3</option>
+            <option value="T4">T4</option>
+            <option value="T5+">T5+</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="b-surface">Surface (m²)</label>
+          <input type="number" id="b-surface" min="0" step="0.5" placeholder="ex: 35" />
+        </div>
+        <div class="field">
+          <label for="b-floor">Étage</label>
+          <input type="number" id="b-floor" min="0" step="1" placeholder="ex: 2" />
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="b-price">Prix d'achat (€)</label>
+          <input type="number" id="b-price" min="0" step="1000" placeholder="ex: 189000" />
+        </div>
+        <div class="field">
+          <label for="b-works">Travaux estimés (€)</label>
+          <input type="number" id="b-works" min="0" step="500" value="0" />
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="b-rent">Loyer estimé/mois (€) <span class="hint" id="rent-hint"></span></label>
+          <input type="number" id="b-rent" min="0" step="10" placeholder="auto-estimé" />
+        </div>
+        <div class="field">
+          <label for="b-rent-mode">Mode location</label>
+          <select id="b-rent-mode">
+            <option value="vide">Location vide</option>
+            <option value="meuble">Location meublée (+12%)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="field">
+          <label for="b-charges">Charges copro (€/mois)</label>
+          <input type="number" id="b-charges" min="0" step="5" value="0" />
+        </div>
+        <div class="field">
+          <label for="b-taxe">Taxe foncière (€/an)</label>
+          <input type="number" id="b-taxe" min="0" step="50" value="0" />
+        </div>
+        <div class="field">
+          <label for="b-elevator">Ascenseur</label>
+          <select id="b-elevator">
+            <option value="false">Non</option>
+            <option value="true">Oui</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="b-dpe">DPE</label>
+          <select id="b-dpe">
+            <option value="">—</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D" selected>D</option>
+            <option value="E">E</option>
+            <option value="F">F</option>
+            <option value="G">G</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="b-ges">GES</label>
+          <select id="b-ges">
+            <option value="">—</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D" selected>D</option>
+            <option value="E">E</option>
+            <option value="F">F</option>
+            <option value="G">G</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="b-copro-lots">Lots copropriété (optionnel)</label>
+          <input type="number" id="b-copro-lots" min="0" step="1" placeholder="ex: 56" />
+        </div>
+        <div class="field">
+          <label for="b-condition">État</label>
+          <select id="b-condition">
+            <option value="neuf">Refait à neuf</option>
+            <option value="bon" selected>Bon état</option>
+            <option value="rafraichir">À rafraîchir</option>
+            <option value="travaux">Gros travaux</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRÊT -->
+    <section class="card">
+      <h2>② Prêt immobilier</h2>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="l-apport">Apport personnel (€)</label>
+          <input type="number" id="l-apport" min="0" step="1000" value="0" />
+          <span class="hint">Sert à payer les frais de notaire (~7,5%) en priorité</span>
+        </div>
+        <div class="field">
+          <label for="l-borrow-notaire">Inclure frais notaire dans l'emprunt</label>
+          <select id="l-borrow-notaire">
+            <option value="false" selected>Non (payés sur apport)</option>
+            <option value="true">Oui</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="field">
+          <label for="l-rate">Taux nominal (%)</label>
+          <input type="number" id="l-rate" min="0" step="0.01" value="2.90" />
+        </div>
+        <div class="field">
+          <label for="l-insurance">Assurance (%)</label>
+          <input type="number" id="l-insurance" min="0" step="0.01" value="0.20" />
+        </div>
+        <div class="field">
+          <label for="l-duration">Durée (ans)</label>
+          <input type="number" id="l-duration" min="5" max="30" step="1" value="20" />
+        </div>
+      </div>
+
+      <div class="field-toggle">
+        <label>Différé d'amortissement 24 mois</label>
+        <label class="switch">
+          <input type="checkbox" id="l-deferred" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- HYPOTHÈSES -->
+    <section class="card collapsible">
+      <h2 class="collapsible-trigger">③ Hypothèses fines <span class="chev">▾</span></h2>
+      <div class="collapsible-body">
+        <div class="grid-2">
+          <div class="field">
+            <label for="a-gestion">Gestion locative (% loyer)</label>
+            <input type="number" id="a-gestion" min="0" step="0.5" value="7" />
+          </div>
+          <div class="field">
+            <label for="a-vacance">Vacance (% loyer)</label>
+            <input type="number" id="a-vacance" min="0" step="0.5" value="5" />
+          </div>
+          <div class="field">
+            <label for="a-entretien">Entretien (% loyer)</label>
+            <input type="number" id="a-entretien" min="0" step="0.5" value="5" />
+          </div>
+          <div class="field">
+            <label for="a-pno">Assurance PNO (€/an)</label>
+            <input type="number" id="a-pno" min="0" step="10" value="120" />
+          </div>
+          <div class="field">
+            <label for="a-charges-pct">Charges non récup. (%)</label>
+            <input type="number" id="a-charges-pct" min="0" step="5" value="40" />
+          </div>
+          <div class="field">
+            <label for="a-tmi">TMI (%)</label>
+            <select id="a-tmi">
+              <option value="0">0%</option>
+              <option value="11">11%</option>
+              <option value="30" selected>30%</option>
+              <option value="41">41%</option>
+              <option value="45">45%</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ===================================================== -->
+  <!-- COLONNE DROITE : ANALYSE                              -->
+  <!-- ===================================================== -->
+  <section class="col-output">
+
+    <!-- VERDICT -->
+    <article class="verdict-card" id="verdict">
+      <div class="verdict-empty">
+        <div class="verdict-icon">📋</div>
+        <h3>Saisissez les informations du bien</h3>
+        <p>Le verdict d'investissement et les indicateurs apparaîtront automatiquement.</p>
+      </div>
+    </article>
+
+    <!-- KPI -->
+    <article class="card kpi-block" id="kpi-block" hidden>
+      <h3>Indicateurs clés</h3>
+      <div class="kpi-grid-4">
+        <div class="kpi"><div class="kpi-label">Rendement brut</div><div class="kpi-value" id="kpi-yield-gross">—</div></div>
+        <div class="kpi"><div class="kpi-label">Rendement net</div><div class="kpi-value" id="kpi-yield-net">—</div></div>
+        <div class="kpi"><div class="kpi-label">Cash-flow / mois</div><div class="kpi-value" id="kpi-cashflow">—</div></div>
+        <div class="kpi"><div class="kpi-label">Effort sur 20 ans</div><div class="kpi-value" id="kpi-effort">—</div></div>
+      </div>
+    </article>
+
+    <!-- DÉTAIL FINANCIER -->
+    <article class="card" id="finance-block" hidden>
+      <h3>Détail financier</h3>
+      <div class="detail-grid">
+        <div class="detail-row"><span>Prix + travaux</span><strong id="d-price-works">—</strong></div>
+        <div class="detail-row"><span>Frais de notaire (7,5%)</span><strong id="d-notaire">—</strong></div>
+        <div class="detail-row"><span>Coût total acquisition</span><strong id="d-total-acq">—</strong></div>
+        <div class="detail-row"><span>Apport personnel</span><strong id="d-apport">—</strong></div>
+        <div class="detail-row"><span>Montant emprunté</span><strong id="d-borrow">—</strong></div>
+        <div class="detail-row sep"><span>Mensualité hors assurance</span><strong id="d-monthly">—</strong></div>
+        <div class="detail-row"><span>Mensualité assurance</span><strong id="d-monthly-ins">—</strong></div>
+        <div class="detail-row strong"><span>Mensualité totale</span><strong id="d-monthly-total">—</strong></div>
+        <div class="detail-row sep"><span>Loyer mensuel brut</span><strong id="d-rent">—</strong></div>
+        <div class="detail-row"><span>Loyer net mensuel (après charges)</span><strong id="d-rent-net">—</strong></div>
+        <div class="detail-row"><span>Cash-flow mensuel (avant impôts)</span><strong id="d-cf-pre">—</strong></div>
+        <div class="detail-row"><span>Cash-flow mensuel (après impôts)</span><strong id="d-cf-post">—</strong></div>
+        <div class="detail-row sep strong"><span>Loyer d'équilibre (CF=0)</span><strong id="d-be">—</strong></div>
+      </div>
+    </article>
+
+    <!-- COMPARAISON MARCHÉ -->
+    <article class="card" id="market-block" hidden>
+      <h3>Comparaison marché local</h3>
+      <p class="muted small" id="market-city">—</p>
+      <div class="market-bars" id="market-bars"></div>
+    </article>
+
+    <!-- RISQUES -->
+    <article class="card" id="risks-block" hidden>
+      <h3>Analyse des risques</h3>
+      <div id="risks-list"></div>
+    </article>
+
+    <!-- OPTIMISATIONS -->
+    <article class="card" id="opti-block" hidden>
+      <h3>Pistes d'optimisation</h3>
+      <div id="opti-list"></div>
+    </article>
+
+    <!-- AMORTISSEMENT -->
+    <article class="card collapsible" id="amort-block" hidden>
+      <h3 class="collapsible-trigger">Tableau d'amortissement <span class="chev">▾</span></h3>
+      <div class="collapsible-body">
+        <div class="table-wrap">
+          <table class="amort">
+            <thead>
+              <tr><th>Année</th><th>Capital dû</th><th>Intérêts</th><th>Capital remb.</th><th>Assurance</th></tr>
+            </thead>
+            <tbody id="amort-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p class="muted small">
+      Outil d'aide à la décision. Calculs indicatifs basés sur des hypothèses paramétrables.
+      Les données de marché par commune sont des fourchettes médianes 2025 (sources : MeilleursAgents, Clameur, DVF).
+      Ne constitue pas un conseil en investissement.
+    </p>
+  </div>
+</footer>
+
+<script src="market.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

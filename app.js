@@ -1350,6 +1350,249 @@ async function exportPDF(btn) {
 }
 
 /* ============================================================
+   SAUVEGARDES & COMPARAISON MULTI-BIENS (localStorage)
+   ============================================================ */
+
+const SAVES_KEY = "decision-immo-saves";
+
+function loadSaves() {
+  try {
+    const raw = localStorage.getItem(SAVES_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function persistSaves(saves) {
+  try {
+    localStorage.setItem(SAVES_KEY, JSON.stringify(saves));
+  } catch (e) {
+    alert("Sauvegarde impossible : stockage local indisponible.");
+  }
+}
+
+function addCurrentSave() {
+  const inp = readInputs();
+  if (!inp.bien.price || !inp.bien.surface) {
+    alert("Saisissez au moins prix et surface avant de sauvegarder.");
+    return;
+  }
+  const defaultName = `${inp.bien.city || "Bien"}${inp.bien.surface ? ` ${inp.bien.surface}m²` : ""}${inp.bien.price ? ` ${Math.round(inp.bien.price/1000)}k€` : ""}`;
+  const name = prompt("Nom du bien :", defaultName);
+  if (!name) return;
+  const saves = loadSaves();
+  saves.push({
+    id: "s_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+    name: name.trim(),
+    savedAt: new Date().toISOString(),
+    state: serializeState(),
+  });
+  persistSaves(saves);
+  updateSavesCount();
+  // Feedback visuel sur le bouton de la carte
+  const btn = $("b-save");
+  const hint = $("b-save-hint");
+  if (btn) {
+    const originalText = btn.textContent;
+    btn.classList.add("saved");
+    btn.textContent = "✓ Bien sauvegardé";
+    if (hint) hint.textContent = `Disponible dans "Mes biens" en haut à droite (${saves.length} bien${saves.length > 1 ? "s" : ""}).`;
+    setTimeout(() => {
+      btn.classList.remove("saved");
+      btn.textContent = originalText;
+    }, 2000);
+  }
+}
+
+function deleteSave(id) {
+  if (!confirm("Supprimer ce bien sauvegardé ?")) return;
+  const saves = loadSaves().filter(s => s.id !== id);
+  persistSaves(saves);
+  renderSavesPanel();
+}
+
+function loadSave(id) {
+  const save = loadSaves().find(s => s.id === id);
+  if (!save) return;
+  applyState(save.state);
+  closeSavesPanel();
+  render();
+  syncURL();
+}
+
+function openSavesPanel() {
+  $("saves-overlay").hidden = false;
+  document.body.style.overflow = "hidden";
+  renderSavesPanel();
+}
+
+function closeSavesPanel() {
+  $("saves-overlay").hidden = true;
+  document.body.style.overflow = "";
+}
+
+function updateSavesCount() {
+  const n = loadSaves().length;
+  const badge = $("btn-saves-count");
+  if (badge) badge.textContent = n;
+}
+
+function analyzeFromState(state) {
+  // Sauvegarde l'état courant des inputs, applique state, lit, restore
+  const current = serializeState();
+  applyState(state);
+  const inp = readInputs();
+  const a = analyze(inp);
+  applyState(current); // restaure
+  return { inp, a };
+}
+
+function renderSavesPanel() {
+  const saves = loadSaves();
+  updateSavesCount();
+  $("saves-count-text").textContent = saves.length === 0
+    ? "Aucun bien sauvegardé"
+    : `${saves.length} bien${saves.length > 1 ? "s" : ""} sauvegardé${saves.length > 1 ? "s" : ""}`;
+
+  const list = $("saves-list");
+  if (saves.length === 0) {
+    list.innerHTML = `<div class="saves-empty">Aucun bien sauvegardé pour l'instant.<br><br>Pour commencer : remplissez le formulaire à gauche, puis cliquez sur <strong>💾 Sauvegarder ce bien</strong> en bas de la section "① Bien immobilier". Vous pourrez ensuite comparer plusieurs biens en parallèle.</div>`;
+    $("saves-compare").hidden = true;
+    return;
+  }
+
+  list.innerHTML = saves.map(s => {
+    const ville = s.state["b-city"] || "—";
+    const prix = s.state["b-price"] ? Number(s.state["b-price"]).toLocaleString("fr-FR") + " €" : "—";
+    const surf = s.state["b-surface"] ? `${s.state["b-surface"]} m²` : "";
+    const date = new Date(s.savedAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+    return `
+      <div class="saves-item" data-id="${s.id}">
+        <div class="saves-item-info">
+          <div class="saves-item-name">${escapeHTML(s.name)}</div>
+          <div class="saves-item-meta">${escapeHTML(ville)} · ${prix}${surf ? ` · ${surf}` : ""} · ${date}</div>
+        </div>
+        <div class="saves-item-actions">
+          <button type="button" class="saves-btn-load" data-id="${s.id}">Charger</button>
+          <button type="button" class="saves-btn-del" data-id="${s.id}">×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Wirer les boutons (event delegation pour rester simple)
+  list.querySelectorAll(".saves-btn-load").forEach(b => {
+    b.addEventListener("click", () => loadSave(b.dataset.id));
+  });
+  list.querySelectorAll(".saves-btn-del").forEach(b => {
+    b.addEventListener("click", () => deleteSave(b.dataset.id));
+  });
+
+  // Tableau comparatif (si ≥ 2 biens, ou ≥ 1 + bien courant valide)
+  const currentInp = readInputs();
+  const currentValid = currentInp.bien.price > 0 && currentInp.bien.surface > 0;
+  const items = saves.map(s => {
+    const { inp, a } = analyzeFromState(s.state);
+    return { name: s.name, inp, a, isCurrent: false, id: s.id };
+  });
+  if (currentValid) {
+    items.unshift({
+      name: "★ Bien actuel",
+      inp: currentInp,
+      a: analyze(currentInp),
+      isCurrent: true,
+      id: null,
+    });
+  }
+  const validItems = items.filter(it => it.a);
+  if (validItems.length < 2) {
+    $("saves-compare").hidden = true;
+    return;
+  }
+  $("saves-compare").hidden = false;
+  renderCompareTable(validItems);
+}
+
+function renderCompareTable(items) {
+  // Pour chaque bien, on calcule le TRI médian sur 15 ans (scénario 2%/an)
+  const enriched = items.map(it => {
+    const proj = buildProjection(it.a, 15, 2);
+    return { ...it, tri15: proj.tri };
+  });
+
+  const fmtNum = v => v == null ? "—" : fmtEUR(v);
+  const fmtP = v => v == null ? "—" : fmtPct(v);
+  const cls = (v, threshGood, threshBad, lowerIsBetter = false) => {
+    if (v == null) return "";
+    const good = lowerIsBetter ? v <= threshGood : v >= threshGood;
+    const bad  = lowerIsBetter ? v >= threshBad  : v <= threshBad;
+    return good ? "cmp-good" : bad ? "cmp-bad" : "";
+  };
+
+  // Best-in-row helper
+  const bestIn = (vals, higherBetter = true) => {
+    const valid = vals.filter(v => v != null && isFinite(v));
+    if (valid.length < 2) return null;
+    return higherBetter ? Math.max(...valid) : Math.min(...valid);
+  };
+
+  // Lignes du tableau (label, valueExtractor, fmt, higherBetter)
+  const rows = [
+    ["Ville",            it => it.inp.bien.city || "—", v => v, null],
+    ["Prix d'achat",     it => it.inp.bien.price,        fmtNum, false],
+    ["Surface",          it => it.inp.bien.surface,      v => v == null ? "—" : `${v} m²`, null],
+    ["Prix / m²",        it => it.inp.bien.price && it.inp.bien.surface ? Math.round(it.inp.bien.price / it.inp.bien.surface) : null, fmtNum, false],
+    ["Loyer mensuel",    it => Math.round(it.a.baseRent), fmtNum, true],
+    ["Rendement brut",   it => it.a.yieldGross,           fmtP, true],
+    ["Rendement net",    it => it.a.yieldNet,             fmtP, true],
+    ["Cash-flow / mois", it => Math.round(it.a.cashflowPre), fmtNum, true],
+    ["Mensualité prêt",  it => Math.round(it.a.loanComp.monthlyTotal), fmtNum, false],
+    ["Coût total acq.",  it => Math.round(it.a.totalAcq), fmtNum, false],
+    ["TRI 15 ans (médian +2%)", it => it.tri15, fmtP, true],
+  ];
+
+  // Build header
+  let html = "<thead><tr><th></th>";
+  enriched.forEach(it => {
+    html += `<th class="${it.isCurrent ? "cmp-current" : ""}">${escapeHTML(it.name)}</th>`;
+  });
+  html += "</tr></thead><tbody>";
+
+  rows.forEach(([label, extractor, fmt, higherBetter]) => {
+    const vals = enriched.map(it => extractor(it));
+    const best = higherBetter !== null ? bestIn(vals, higherBetter) : null;
+    html += `<tr><th>${label}</th>`;
+    vals.forEach(v => {
+      const isBest = best != null && v === best;
+      html += `<td class="${isBest ? "cmp-best" : ""}">${fmt(v)}</td>`;
+    });
+    html += "</tr>";
+  });
+
+  // Action row : delete buttons (no delete on current)
+  html += `<tr class="cmp-actions"><th></th>`;
+  enriched.forEach(it => {
+    if (it.isCurrent) {
+      html += `<td><span class="muted small">—</span></td>`;
+    } else {
+      html += `<td><button type="button" class="cmp-load" data-id="${it.id}">Charger</button></td>`;
+    }
+  });
+  html += "</tr>";
+
+  html += "</tbody>";
+  $("saves-compare-table").innerHTML = html;
+  $("saves-compare-table").querySelectorAll(".cmp-load").forEach(b => {
+    b.addEventListener("click", () => loadSave(b.dataset.id));
+  });
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+/* ============================================================
    INIT
    ============================================================ */
 
@@ -1379,6 +1622,22 @@ function init() {
   // Bouton export PDF
   const pdfBtn = $("btn-pdf");
   if (pdfBtn) pdfBtn.addEventListener("click", () => exportPDF(pdfBtn));
+
+  // Bouton sauvegardes
+  const savesBtn = $("btn-saves");
+  if (savesBtn) savesBtn.addEventListener("click", openSavesPanel);
+  const savesClose = $("saves-close");
+  if (savesClose) savesClose.addEventListener("click", closeSavesPanel);
+  const bSave = $("b-save");
+  if (bSave) bSave.addEventListener("click", addCurrentSave);
+  const savesOverlay = $("saves-overlay");
+  if (savesOverlay) savesOverlay.addEventListener("click", e => {
+    if (e.target === savesOverlay) closeSavesPanel();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && savesOverlay && !savesOverlay.hidden) closeSavesPanel();
+  });
+  updateSavesCount();
 
   setupAutocomplete();
   render();

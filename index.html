@@ -24,6 +24,11 @@
         <span class="btn-share-icon">📄</span>
         <span class="btn-share-label">Exporter PDF</span>
       </button>
+      <button type="button" id="btn-saves" class="btn-share btn-saves" title="Voir les biens sauvegardés">
+        <span class="btn-share-icon">💾</span>
+        <span class="btn-share-label">Mes biens</span>
+        <span class="btn-saves-count" id="btn-saves-count">0</span>
+      </button>
     </div>
   </div>
 </header>
@@ -181,6 +186,13 @@
             <option value="travaux">Gros travaux</option>
           </select>
         </div>
+      </div>
+
+      <div class="card-footer-actions">
+        <button type="button" id="b-save" class="btn-secondary" title="Sauvegarder ce bien dans la liste comparative">
+          💾 Sauvegarder ce bien
+        </button>
+        <span class="hint" id="b-save-hint">Pour le retrouver plus tard et le comparer avec d'autres biens.</span>
       </div>
     </section>
 
@@ -407,6 +419,29 @@
   </section>
 
 </main>
+
+<!-- PANNEAU SAUVEGARDES & COMPARAISON -->
+<div class="saves-overlay" id="saves-overlay" hidden>
+  <div class="saves-panel" role="dialog" aria-labelledby="saves-title">
+    <div class="saves-head">
+      <h2 id="saves-title">Mes biens sauvegardés</h2>
+      <button type="button" class="saves-close" id="saves-close" aria-label="Fermer">×</button>
+    </div>
+
+    <div class="saves-actions">
+      <span class="muted small" id="saves-count-text">Aucun bien sauvegardé</span>
+    </div>
+
+    <div class="saves-list" id="saves-list"></div>
+
+    <div class="saves-compare" id="saves-compare" hidden>
+      <h3>Tableau comparatif</h3>
+      <div class="saves-compare-wrap">
+        <table class="saves-compare-table" id="saves-compare-table"></table>
+      </div>
+    </div>
+  </div>
+</div>
 
 <footer class="site-footer">
   <div class="container">

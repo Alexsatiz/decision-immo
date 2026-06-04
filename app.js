@@ -894,14 +894,122 @@ function setupAutocomplete() {
 }
 
 /* ============================================================
+   PARTAGE — sérialisation de l'état dans l'URL
+   ============================================================ */
+
+// IDs de tous les inputs à conserver (mêmes que readInputs + slider projection)
+const SHARE_IDS = [
+  "b-city","b-district","b-type","b-surface","b-floor","b-price","b-works",
+  "b-rent","b-rent-mode","b-charges","b-taxe","b-elevator","b-cave","b-parking",
+  "b-dpe","b-ges","b-copro-lots","b-condition",
+  "l-apport","l-borrow-notaire","l-rate","l-insurance","l-duration","l-deferred",
+  "a-gestion","a-vacance","a-entretien","a-pno","a-charges-pct","a-tmi",
+  "p-horizon",
+];
+
+function serializeState() {
+  const state = {};
+  for (const id of SHARE_IDS) {
+    const el = $(id);
+    if (!el) continue;
+    state[id] = el.type === "checkbox" ? (el.checked ? 1 : 0) : el.value;
+  }
+  if (SELECTED_COMMUNE) {
+    state._c = {
+      n: SELECTED_COMMUNE.nom,
+      c: SELECTED_COMMUNE.code,
+      d: SELECTED_COMMUNE.codeDepartement,
+      p: SELECTED_COMMUNE.population,
+    };
+  }
+  return state;
+}
+
+function encodeState(state) {
+  // base64url-safe pour passer dans le hash sans %-encodage moche
+  const json = JSON.stringify(state);
+  return btoa(unescape(encodeURIComponent(json))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeState(hash) {
+  try {
+    const padded = hash.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(escape(atob(padded)));
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+}
+
+function applyState(state) {
+  if (!state) return;
+  for (const id of SHARE_IDS) {
+    if (state[id] === undefined) continue;
+    const el = $(id);
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!state[id];
+    else el.value = state[id];
+  }
+  if (state._c && state._c.n) {
+    SELECTED_COMMUNE = {
+      nom: state._c.n,
+      code: state._c.c,
+      codeDepartement: state._c.d,
+      population: state._c.p,
+    };
+    const hint = $("city-hint");
+    if (hint) {
+      if (MARKET_PRECISE[state._c.n]) {
+        hint.innerHTML = `<span style="color:var(--good)">● Données de marché précises</span>`;
+      } else {
+        hint.innerHTML = `<span style="color:var(--warn)">● Estimation auto · ${(state._c.p || 0).toLocaleString("fr-FR")} hab. · Dépt ${state._c.d}</span>`;
+      }
+    }
+  }
+}
+
+let urlSyncTimer = null;
+function syncURL() {
+  // Debounce pour éviter de spammer history.replaceState à chaque keystroke
+  clearTimeout(urlSyncTimer);
+  urlSyncTimer = setTimeout(() => {
+    const encoded = encodeState(serializeState());
+    history.replaceState(null, "", "#" + encoded);
+  }, 400);
+}
+
+function copyShareLink(btn) {
+  const encoded = encodeState(serializeState());
+  const url = `${location.origin}${location.pathname}#${encoded}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const label = btn.querySelector(".btn-share-label");
+    const original = label ? label.textContent : "";
+    btn.classList.add("copied");
+    if (label) label.textContent = "Lien copié !";
+    setTimeout(() => {
+      btn.classList.remove("copied");
+      if (label) label.textContent = original;
+    }, 1800);
+  }).catch(() => {
+    alert("Lien :\n" + url);
+  });
+}
+
+/* ============================================================
    INIT
    ============================================================ */
 
 function init() {
-  // Tous les inputs déclenchent le recalcul
+  // Restaurer l'état depuis l'URL avant de brancher les listeners
+  if (location.hash && location.hash.length > 1) {
+    const state = decodeState(location.hash.slice(1));
+    applyState(state);
+  }
+
+  // Tous les inputs déclenchent le recalcul + sync URL
   document.querySelectorAll("input, select").forEach(el => {
-    el.addEventListener("input", render);
-    el.addEventListener("change", render);
+    el.addEventListener("input", () => { render(); syncURL(); });
+    el.addEventListener("change", () => { render(); syncURL(); });
   });
 
   // Collapsibles
@@ -909,6 +1017,10 @@ function init() {
     const trig = c.querySelector(".collapsible-trigger");
     if (trig) trig.addEventListener("click", () => c.classList.toggle("open"));
   });
+
+  // Bouton de partage
+  const shareBtn = $("btn-share");
+  if (shareBtn) shareBtn.addEventListener("click", () => copyShareLink(shareBtn));
 
   setupAutocomplete();
   render();

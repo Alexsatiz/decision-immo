@@ -74,7 +74,25 @@ html, body {
   font-size: 12px;
 }
 .header-tag { font-size: 13px; color: var(--text-muted); margin: 0; }
-@media (max-width: 700px) { .header-tag { display: none; } }
+.header-actions { display: flex; align-items: center; gap: 16px; }
+.btn-share {
+  display: flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; font-weight: 600;
+  padding: 7px 12px;
+  background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+}
+.btn-share:hover { background: var(--accent-strong); }
+.btn-share:active { transform: scale(0.97); }
+.btn-share.copied { background: var(--good); }
+.btn-share-icon { font-size: 13px; }
+@media (max-width: 700px) {
+  .header-tag { display: none; }
+  .btn-share-label { display: none; }
+  .btn-share { padding: 7px 9px; }
+}
 
 /* LAYOUT */
 .layout {

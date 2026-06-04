@@ -1593,6 +1593,299 @@ function escapeHTML(s) {
 }
 
 /* ============================================================
+   IMPORT ANNONCE — parser texte multi-portails
+   ============================================================ */
+
+// Normalise un nombre français : "280 000,50" → 280000.50, "280.000" → 280000
+function parseFrNum(str) {
+  if (!str) return null;
+  let s = String(str).replace(/ | |\s/g, "").trim();
+  // Si présence de virgule, c'est le séparateur décimal
+  if (s.includes(",")) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if ((s.match(/\./g) || []).length === 1 && /\.\d{1,2}$/.test(s) && !/\.\d{3}/.test(s)) {
+    // Un seul point, avec 1 ou 2 décimales et pas un format milliers : décimal anglo
+    // (rare en FR, on laisse tel quel)
+  } else {
+    // Points = séparateurs de milliers
+    s = s.replace(/\./g, "");
+  }
+  const n = parseFloat(s);
+  return isFinite(n) ? n : null;
+}
+
+// Liste statique de communes connues (les plus susceptibles d'être présentes dans une annonce)
+const KNOWN_CITIES_HINTS = [
+  "Le Perreux-sur-Marne","Nogent-sur-Marne","Saint-Maur-des-Fossés","Champigny-sur-Marne",
+  "Bry-sur-Marne","Villiers-sur-Marne","Fontenay-sous-Bois","Vincennes","Joinville-le-Pont",
+  "Noisy-le-Grand","Chelles","Gagny","Neuilly-Plaisance","Neuilly-sur-Marne","Rosny-sous-Bois",
+  "Paris","Lyon","Marseille","Bordeaux","Toulouse","Lille","Nantes","Strasbourg","Rennes",
+  "Nice","Montpellier","Grenoble"
+];
+
+function parseListing(text) {
+  const result = {};
+  if (!text || text.length < 20) return result;
+
+  // Nettoyage : on remplace tout whitespace Unicode (nbsp, narrow nbsp, thin space, etc.)
+  // par un espace ASCII via la classe Unicode \s (avec flag /u et \p{Zs}).
+  let t = text.replace(/[   -​  　﻿]/g, " ");
+  t = t.replace(/[ \t]+/g, " ");
+  const tl = t.toLowerCase();
+
+  // PRIX : "280 000 €" / "280.000€" / "Prix : 280 000 €" / "280k€" / "545000 €"
+  const pricePatterns = [
+    /(?:prix(?:\s+de\s+vente)?|tarif|au prix de|propos[ée]\s+[àa])\s*[:\-]?\s*([\d \.,]+)\s*(?:€|eur(?:os?)?|euros)/i,
+    /([\d]{1,3}(?:[\s.][\d]{3})+(?:[,.][\d]{1,2})?)\s*(?:€|eur(?:os?)?|euros)\b/i,
+    /([\d]{2,4})\s*k\s*€/i,
+    /([\d]{5,7})\s*(?:€|eur(?:os?)?|euros)\b/i,
+  ];
+  for (const re of pricePatterns) {
+    const m = t.match(re);
+    if (m) {
+      let v = parseFrNum(m[1]);
+      if (re.source.includes("k\\s*€") && v) v *= 1000;
+      if (v && v >= 30000 && v <= 20000000) {
+        result.price = Math.round(v);
+        break;
+      }
+    }
+  }
+
+  // SURFACE : "35 m²" / "35,5 m2" / "Surface : 35" / "24m²"
+  const surfacePatterns = [
+    /(?:surface(?:\s+habitable)?|superficie|surface\s+loi\s+carrez|carrez)\s*[:\-]?\s*([\d]+(?:[,.]\d+)?)\s*(?:m\s*[²2]|m\s*c|m[èe]tres?\s+carr[ée]s?)/i,
+    /([\d]+(?:[,.]\d+)?)\s*(?:m\s*[²2]|m[èe]tres?\s+carr[ée]s?)\b/i,
+    /(?:surface|superficie)\s*[:\-]\s*([\d]+(?:[,.]\d+)?)/i,
+  ];
+  for (const re of surfacePatterns) {
+    const m = t.match(re);
+    if (m) {
+      const v = parseFrNum(m[1]);
+      if (v && v >= 8 && v <= 1000) { result.surface = v; break; }
+    }
+  }
+
+  // TYPE : "T2", "2 pièces", "Studio", "F3"
+  if (/\bstudio\b/i.test(t)) {
+    result.type = "Studio";
+  } else {
+    const piecesM = t.match(/\b([TF])\s*([1-9])\b/i) || t.match(/\b([1-9])\s*pi[eè]ces?\b/i);
+    if (piecesM) {
+      const n = parseInt(piecesM[2] || piecesM[1], 10);
+      result.type = n === 1 ? "T1" : n >= 5 ? "T5+" : `T${n}`;
+    }
+  }
+
+  // VILLE : on cherche une ville connue dans le texte (case-insensitive)
+  for (const city of KNOWN_CITIES_HINTS) {
+    const re = new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (re.test(t)) {
+      result.city = city;
+      break;
+    }
+  }
+  // Code postal → département → suggestion fallback
+  if (!result.city) {
+    const cpM = t.match(/\b(75|77|78|91|92|93|94|95|13|33|31|59|44|67|35|06|34|38|69)\d{3}\b/);
+    if (cpM) result._cpHint = cpM[0];
+  }
+
+  // CHARGES COPRO : "Charges : 120 €/mois" / "Charges mensuelles : 95€"
+  const chargesM = t.match(/charges?\s*(?:copropri[ée]t[ée]|mensuelles?|de\s+copropri[ée]t[ée])?\s*[:\-]?\s*([\d \.,]+)\s*€\s*(?:\/\s*mois|par\s+mois|mensuelles?|\/\s*an|annuelles?|par\s+an)?/i);
+  if (chargesM) {
+    const v = parseFrNum(chargesM[1]);
+    const isAnnual = /\/\s*an|annuelles?|par\s+an/i.test(chargesM[0]);
+    if (v && v < 10000) {
+      result.charges = isAnnual ? Math.round(v / 12) : Math.round(v);
+    }
+  }
+
+  // TAXE FONCIÈRE : "Taxe foncière : 850 €"
+  const taxeM = t.match(/taxe\s+fonci[èe]re\s*[:\-]?\s*([\d \.,]+)\s*€/i);
+  if (taxeM) {
+    const v = parseFrNum(taxeM[1]);
+    if (v && v >= 50 && v <= 50000) result.taxe = Math.round(v);
+  }
+
+  // DPE : "DPE : C" / "Classe énergie D" / "Étiquette énergie : E" / "DPE\nC\n245 kWh"
+  const dpeM = t.match(/(?:dpe|classe\s+[ée]nerg(?:[ée]tique|ie)|[ée]tiquette\s+[ée]nergie|consommation\s+[ée]nerg[ée]tique|diagnostic\s+de\s+performance\s+[ée]nerg[ée]tique)\s*[:\-]?\s*([A-G])\b/i);
+  if (dpeM) result.dpe = dpeM[1].toUpperCase();
+  const gesM = t.match(/(?:ges|gaz\s+[àa]\s+effet\s+de\s+serre|[ée]missions?\s+(?:de\s+)?ges|classe\s+ges|climat)\s*[:\-]?\s*([A-G])\b/i);
+  if (gesM) result.ges = gesM[1].toUpperCase();
+
+  // ÉTAGE : "2e étage", "Étage : 3", "RDC", "étage 2/5", "3ème étage"
+  if (/\b(?:rdc|rez-de-chauss[ée]e|rez de chauss[ée]e)\b/i.test(t)) {
+    result.floor = 0;
+  } else {
+    const floorM = t.match(/(?:[ée]tage)\s*[:\-]?\s*(\d{1,2})(?:\s*\/\s*\d+)?/i)
+                || t.match(/(\d{1,2})\s*[èeé]?(?:me|er|nd|ème)?\s*[ée]tage/i);
+    if (floorM) {
+      const n = parseInt(floorM[1], 10);
+      if (n >= 0 && n <= 50) result.floor = n;
+    }
+  }
+
+  // ASCENSEUR : "ascenseur", mais éviter "sans ascenseur" / "pas d'ascenseur"
+  if (/\bascenseur\b/i.test(tl)) {
+    if (/(?:sans|pas\s+d['e]\s*|aucun)\s*ascenseur/i.test(tl)) result.elevator = false;
+    else result.elevator = true;
+  }
+
+  // CAVE
+  if (/\bcave\b/i.test(tl)) {
+    if (/(?:sans|pas\s+d['e]\s*|aucune)\s*cave/i.test(tl)) result.cave = false;
+    else result.cave = true;
+  }
+
+  // PARKING : box / parking / garage / stationnement
+  if (/\bbox\b/i.test(tl)) {
+    result.parking = "box";
+  } else if (/\b(?:parking|place\s+de\s+(?:parking|stationnement)|garage|stationnement)\b/i.test(tl)) {
+    if (/(?:sans|pas\s+d['e]\s*|aucun)\s*(?:parking|garage|stationnement)/i.test(tl)) {
+      result.parking = "none";
+    } else {
+      result.parking = "private";
+    }
+  }
+
+  // LOTS COPROPRIÉTÉ : "56 lots", "copropriété de 120 lots"
+  const lotsM = t.match(/(?:copropri[ée]t[ée]\s+(?:de|comprenant|comportant)?\s*|nombre\s+de\s+lots\s*[:\-]?\s*)(\d{1,4})\s*lots?/i)
+             || t.match(/(\d{1,4})\s*lots?\b/i);
+  if (lotsM) {
+    const v = parseInt(lotsM[1], 10);
+    if (v >= 2 && v <= 5000) result.coproLots = v;
+  }
+
+  // ÉTAT : mots-clés
+  if (/\b(?:r[ée]nov[ée]\s+r[ée]cemment|refait\s+[àa]\s+neuf|enti[èe]rement\s+r[ée]nov[ée]|neuf|tout\s+refait)\b/i.test(tl)) {
+    result.condition = "neuf";
+  } else if (/\b(?:gros\s+travaux|[àa]\s+r[ée]nover|travaux\s+importants?|[àa]\s+restaurer)\b/i.test(tl)) {
+    result.condition = "travaux";
+  } else if (/\b(?:[àa]\s+rafra[îi]chir|petits?\s+travaux|travaux\s+de\s+rafra[îi]chiss?ement)\b/i.test(tl)) {
+    result.condition = "rafraichir";
+  } else if (/\b(?:bon\s+[ée]tat|excellent\s+[ée]tat|[ée]tat\s+impeccable)\b/i.test(tl)) {
+    result.condition = "bon";
+  }
+
+  return result;
+}
+
+const IMPORT_FIELD_LABELS = {
+  city:       "Ville",
+  type:       "Type",
+  surface:    "Surface (m²)",
+  floor:      "Étage",
+  price:      "Prix d'achat (€)",
+  charges:    "Charges copro (€/mois)",
+  taxe:       "Taxe foncière (€/an)",
+  elevator:   "Ascenseur",
+  cave:       "Cave",
+  parking:    "Parking",
+  dpe:        "DPE",
+  ges:        "GES",
+  coproLots:  "Lots copropriété",
+  condition:  "État",
+};
+
+function formatImportValue(field, v) {
+  if (v === true) return "Oui";
+  if (v === false) return "Non";
+  if (field === "parking") return { none: "Aucun", private: "Place privative", box: "Box fermé" }[v] || v;
+  if (field === "condition") return { neuf: "Refait à neuf", bon: "Bon état", rafraichir: "À rafraîchir", travaux: "Gros travaux" }[v] || v;
+  if (field === "price" || field === "taxe") return Number(v).toLocaleString("fr-FR") + " €";
+  if (field === "charges") return v + " €/mois";
+  if (field === "surface") return v + " m²";
+  return String(v);
+}
+
+let LAST_IMPORT_PARSED = null;
+
+function openImportPanel() {
+  $("import-overlay").hidden = false;
+  document.body.style.overflow = "hidden";
+  $("import-text").value = "";
+  $("import-preview").hidden = true;
+  setTimeout(() => $("import-text").focus(), 50);
+}
+
+function closeImportPanel() {
+  $("import-overlay").hidden = true;
+  document.body.style.overflow = "";
+  LAST_IMPORT_PARSED = null;
+}
+
+function runImportParse() {
+  const text = $("import-text").value;
+  if (!text.trim()) {
+    alert("Collez le texte d'une annonce avant d'analyser.");
+    return;
+  }
+  const parsed = parseListing(text);
+  LAST_IMPORT_PARSED = parsed;
+  const fields = Object.keys(parsed).filter(k => !k.startsWith("_") && IMPORT_FIELD_LABELS[k]);
+
+  if (fields.length === 0) {
+    $("import-fields").innerHTML = `<div class="import-empty">Aucun champ détecté. Essayez avec plus de texte (titre + description complète + caractéristiques).</div>`;
+    $("import-preview").hidden = false;
+    $("import-apply").disabled = true;
+    return;
+  }
+  $("import-apply").disabled = false;
+  $("import-fields").innerHTML = fields.map(f => `
+    <label class="import-field">
+      <input type="checkbox" data-field="${f}" checked />
+      <span class="import-field-label">${IMPORT_FIELD_LABELS[f]}</span>
+      <span class="import-field-value">${escapeHTML(formatImportValue(f, parsed[f]))}</span>
+    </label>
+  `).join("");
+  $("import-preview").hidden = false;
+}
+
+function applyImportToForm() {
+  if (!LAST_IMPORT_PARSED) return;
+  const checkedFields = Array.from($("import-fields").querySelectorAll("input[type=checkbox]:checked"))
+    .map(cb => cb.dataset.field);
+
+  const map = {
+    city:      { id: "b-city",       set: v => $("b-city").value = v },
+    type:      { id: "b-type",       set: v => $("b-type").value = v },
+    surface:   { id: "b-surface",    set: v => $("b-surface").value = v },
+    floor:     { id: "b-floor",      set: v => $("b-floor").value = v },
+    price:     { id: "b-price",      set: v => $("b-price").value = v },
+    charges:   { id: "b-charges",    set: v => $("b-charges").value = v },
+    taxe:      { id: "b-taxe",       set: v => $("b-taxe").value = v },
+    elevator:  { id: "b-elevator",   set: v => $("b-elevator").value = v ? "true" : "false" },
+    cave:      { id: "b-cave",       set: v => $("b-cave").value = v ? "true" : "false" },
+    parking:   { id: "b-parking",    set: v => $("b-parking").value = v },
+    dpe:       { id: "b-dpe",        set: v => $("b-dpe").value = v },
+    ges:       { id: "b-ges",        set: v => $("b-ges").value = v },
+    coproLots: { id: "b-copro-lots", set: v => $("b-copro-lots").value = v },
+    condition: { id: "b-condition",  set: v => $("b-condition").value = v },
+  };
+
+  for (const f of checkedFields) {
+    if (map[f] && LAST_IMPORT_PARSED[f] !== undefined) {
+      map[f].set(LAST_IMPORT_PARSED[f]);
+    }
+  }
+
+  // Si la ville matchée est une commune connue, simuler la sélection
+  if (checkedFields.includes("city") && LAST_IMPORT_PARSED.city) {
+    const known = MARKET_PRECISE[LAST_IMPORT_PARSED.city];
+    if (known) {
+      SELECTED_COMMUNE = { nom: LAST_IMPORT_PARSED.city, code: null, codeDepartement: null, population: null };
+      const hint = $("city-hint");
+      if (hint) hint.innerHTML = `<span style="color:var(--good)">● Données de marché précises</span>`;
+    }
+  }
+
+  closeImportPanel();
+  render();
+  syncURL();
+}
+
+/* ============================================================
    INIT
    ============================================================ */
 
@@ -1638,6 +1931,27 @@ function init() {
     if (e.key === "Escape" && savesOverlay && !savesOverlay.hidden) closeSavesPanel();
   });
   updateSavesCount();
+
+  // Bouton import annonce
+  const importBtn = $("btn-import");
+  if (importBtn) importBtn.addEventListener("click", openImportPanel);
+  const importClose = $("import-close");
+  if (importClose) importClose.addEventListener("click", closeImportPanel);
+  const importParse = $("import-parse");
+  if (importParse) importParse.addEventListener("click", runImportParse);
+  const importApply = $("import-apply");
+  if (importApply) importApply.addEventListener("click", applyImportToForm);
+  const importCancel = $("import-cancel");
+  if (importCancel) importCancel.addEventListener("click", () => { $("import-preview").hidden = true; });
+  const importClear = $("import-clear");
+  if (importClear) importClear.addEventListener("click", () => { $("import-text").value = ""; $("import-preview").hidden = true; });
+  const importOverlay = $("import-overlay");
+  if (importOverlay) importOverlay.addEventListener("click", e => {
+    if (e.target === importOverlay) closeImportPanel();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && importOverlay && !importOverlay.hidden) closeImportPanel();
+  });
 
   setupAutocomplete();
   render();

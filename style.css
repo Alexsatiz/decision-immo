@@ -727,6 +727,111 @@ html, body {
 }
 
 /* SAVES PANEL */
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.card-head h2 { margin: 0; }
+.btn-import {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s;
+}
+.btn-import:hover { background: var(--accent); color: #fff; }
+
+.import-panel { max-width: 720px; }
+.import-panel textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-alt);
+  color: var(--text);
+  resize: vertical;
+  min-height: 200px;
+  font-family: var(--font-mono);
+}
+.import-panel textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+.import-preview {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+.import-preview h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.import-fields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+@media (max-width: 700px) {
+  .import-fields { grid-template-columns: 1fr; }
+}
+.import-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--good);
+  cursor: pointer;
+  font-size: 12px;
+}
+.import-field input[type=checkbox] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.import-field-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.import-field-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  color: var(--text);
+}
+.import-empty {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-muted);
+  background: var(--warn-soft);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+/* SAVES PANEL */
 .card-footer-actions {
   margin-top: 16px;
   padding-top: 14px;

@@ -42,7 +42,12 @@
 
     <!-- BIEN -->
     <section class="card">
-      <h2>① Bien immobilier</h2>
+      <div class="card-head">
+        <h2>① Bien immobilier</h2>
+        <button type="button" id="btn-import" class="btn-import" title="Importer les données depuis le texte d'une annonce">
+          📋 Importer une annonce
+        </button>
+      </div>
 
       <div class="grid-2">
         <div class="field">
@@ -419,6 +424,38 @@
   </section>
 
 </main>
+
+<!-- PANNEAU IMPORT ANNONCE -->
+<div class="saves-overlay" id="import-overlay" hidden>
+  <div class="saves-panel import-panel" role="dialog" aria-labelledby="import-title">
+    <div class="saves-head">
+      <h2 id="import-title">Importer une annonce immobilière</h2>
+      <button type="button" class="saves-close" id="import-close" aria-label="Fermer">×</button>
+    </div>
+
+    <p class="muted small" style="margin-top:0">
+      Sur la page de l'annonce (SeLoger, LeBonCoin, Bien'ici, Logic-Immo, PAP…) :
+      <strong>Cmd+A</strong> puis <strong>Cmd+C</strong> pour tout sélectionner et copier,
+      puis collez ici. Les champs détectés seront remplis automatiquement.
+    </p>
+
+    <textarea id="import-text" rows="12" placeholder="Collez ici le texte intégral de l'annonce…"></textarea>
+
+    <div class="import-actions">
+      <button type="button" class="btn-secondary" id="import-clear">Effacer</button>
+      <button type="button" class="btn-primary" id="import-parse">Analyser et importer</button>
+    </div>
+
+    <div class="import-preview" id="import-preview" hidden>
+      <h3>Données détectées</h3>
+      <div class="import-fields" id="import-fields"></div>
+      <div class="import-actions">
+        <button type="button" class="btn-secondary" id="import-cancel">Annuler</button>
+        <button type="button" class="btn-primary" id="import-apply">Appliquer au formulaire</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- PANNEAU SAUVEGARDES & COMPARAISON -->
 <div class="saves-overlay" id="saves-overlay" hidden>

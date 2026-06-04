@@ -73,12 +73,13 @@
         <div class="field">
           <label for="b-type">Type</label>
           <select id="b-type">
-            <option value="Studio">Studio</option>
-            <option value="T1">T1</option>
-            <option value="T2" selected>T2</option>
-            <option value="T3">T3</option>
-            <option value="T4">T4</option>
-            <option value="T5+">T5+</option>
+            <option value="Studio">Studio (appart)</option>
+            <option value="T1">T1 (appart)</option>
+            <option value="T2" selected>T2 (appart)</option>
+            <option value="T3">T3 (appart)</option>
+            <option value="T4">T4 (appart)</option>
+            <option value="T5+">T5+ (appart)</option>
+            <option value="Maison">Maison</option>
           </select>
         </div>
         <div class="field">
@@ -119,12 +120,15 @@
 
       <div class="grid-3">
         <div class="field">
-          <label for="b-charges">Charges copro (€/mois)</label>
-          <input type="number" id="b-charges" min="0" step="5" value="0" />
+          <label for="b-charges">Charges copro (€/an)</label>
+          <input type="number" id="b-charges" min="0" step="50" value="0" placeholder="ex: 1800" />
         </div>
         <div class="field">
           <label for="b-taxe">Taxe foncière (€/an)</label>
-          <input type="number" id="b-taxe" min="0" step="50" value="0" />
+          <div class="taxe-row">
+            <input type="number" id="b-taxe" min="0" step="50" value="0" />
+            <button type="button" id="btn-estimate-taxe" class="btn-mini" title="Estimer d'après ville, surface et type">Estimer</button>
+          </div>
         </div>
         <div class="field">
           <label for="b-elevator">Ascenseur</label>
@@ -149,6 +153,29 @@
             <option value="none">Aucun</option>
             <option value="private">Place privative</option>
             <option value="box">Box fermé</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="field">
+          <label for="b-outdoor">Extérieur</label>
+          <select id="b-outdoor">
+            <option value="none">Aucun</option>
+            <option value="balcon">Balcon</option>
+            <option value="terrasse">Terrasse</option>
+            <option value="jardin">Jardin</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="b-outdoor-surface">Surface extérieur (m²)</label>
+          <input type="number" id="b-outdoor-surface" min="0" step="1" value="0" placeholder="ex: 12" />
+        </div>
+        <div class="field">
+          <label for="b-pool">Piscine</label>
+          <select id="b-pool">
+            <option value="false">Non</option>
+            <option value="true">Oui</option>
           </select>
         </div>
       </div>

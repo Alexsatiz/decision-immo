@@ -50,6 +50,9 @@ function readInputs() {
       elevator: val("b-elevator") === "true",
       cave: val("b-cave") === "true",
       parking: val("b-parking"), // "none" | "private" | "box"
+      outdoor: val("b-outdoor"), // "none" | "balcon" | "terrasse" | "jardin"
+      outdoorSurface: num("b-outdoor-surface"),
+      pool: val("b-pool") === "true",
       dpe: val("b-dpe"),
       ges: val("b-ges"),
       coproLots: num("b-copro-lots"),
@@ -82,13 +85,92 @@ function readInputs() {
    ESTIMATION LOYER / PRIX MARCHÉ
    ============================================================ */
 
+function outdoorBonus(kind, surface, target) {
+  // target = "rent" | "value"
+  // Renvoie un multiplicateur (1 + bonus) selon le type d'extérieur et sa surface.
+  // Balcon : forfaitaire (généralement <5m², pas de modulation par surface).
+  // Terrasse : 3 paliers selon surface.
+  // Jardin : 3 paliers (impact plus fort).
+  if (kind === "balcon") {
+    return target === "rent" ? 1.02 : 1.03;
+  }
+  if (kind === "terrasse") {
+    if (surface >= 25) return target === "rent" ? 1.07 : 1.12;
+    if (surface >= 10) return target === "rent" ? 1.05 : 1.08;
+    return target === "rent" ? 1.03 : 1.05;
+  }
+  if (kind === "jardin") {
+    if (surface >= 200) return target === "rent" ? 1.10 : 1.18;
+    if (surface >= 50)  return target === "rent" ? 1.08 : 1.12;
+    return target === "rent" ? 1.05 : 1.08;
+  }
+  return 1;
+}
+
 function annexBonus(bien, kind) {
   // kind = "rent" | "value" — retourne le multiplicateur (ex: 1.08)
   let mult = 1;
   if (bien.cave) mult *= 1 + ANNEX_BONUS.cave[kind];
   if (bien.parking === "private") mult *= 1 + ANNEX_BONUS.parkingPrivate[kind];
   else if (bien.parking === "box") mult *= 1 + ANNEX_BONUS.parkingBox[kind];
+  // Extérieur (balcon/terrasse/jardin)
+  if (bien.outdoor && bien.outdoor !== "none") {
+    mult *= outdoorBonus(bien.outdoor, bien.outdoorSurface || 0, kind);
+  }
+  // Piscine : +3% loyer / +8% valeur (entretien lourd → moins d'impact loyer)
+  if (bien.pool) mult *= kind === "rent" ? 1.03 : 1.08;
   return mult;
+}
+
+/* ============================================================
+   ESTIMATION TAXE FONCIÈRE
+   Heuristique basée sur les ratios observés €/m²/an :
+   - Paris : ~10-13 €/m²/an (faible taux, valeurs locatives élevées)
+   - Lyon : ~14-17 €/m²/an
+   - Marseille : ~12-15 €/m²/an
+   - Grandes villes (>200k hab) : ~12-16 €/m²/an
+   - Villes moyennes : ~10-14 €/m²/an
+   - Petites communes : ~8-12 €/m²/an
+   Maison : ×1.4 (foncier bâti + non-bâti, dépendances, terrain)
+   ============================================================ */
+function estimateTaxeFonciere(bien) {
+  if (!bien.surface || bien.surface < 5) return null;
+
+  // Base €/m²/an par ville/arrondissement
+  let basePerM2 = 12; // défaut national
+
+  if (bien.cp && /^750\d{2}$/.test(bien.cp)) {
+    // Paris : varie selon arrondissement (centre plus bas, périphérie un peu plus)
+    const arr = parseInt(bien.cp.slice(3), 10);
+    if (arr <= 8) basePerM2 = 11;
+    else if (arr <= 16) basePerM2 = 12;
+    else basePerM2 = 13;
+  } else if (bien.cp && /^6900\d$/.test(bien.cp)) {
+    basePerM2 = 16;
+  } else if (bien.cp && /^130(0[1-9]|1[0-6])$/.test(bien.cp)) {
+    basePerM2 = 14;
+  } else if (bien.city === "Paris") basePerM2 = 12;
+  else if (bien.city === "Lyon") basePerM2 = 16;
+  else if (bien.city === "Marseille") basePerM2 = 14;
+  else if (SELECTED_COMMUNE && SELECTED_COMMUNE.population) {
+    const pop = SELECTED_COMMUNE.population;
+    if (pop > 200000) basePerM2 = 14;
+    else if (pop > 50000) basePerM2 = 12;
+    else if (pop > 10000) basePerM2 = 11;
+    else basePerM2 = 9;
+  }
+
+  // Type : maison ~+40% (foncier non-bâti, terrain, dépendances)
+  let typeFactor = 1;
+  if (bien.type === "Maison") typeFactor = 1.4;
+
+  // État/standing : neuf paye plus (valeur locative cadastrale revue), travaux paye moins
+  let condFactor = 1;
+  if (bien.condition === "neuf") condFactor = 1.10;
+  else if (bien.condition === "travaux") condFactor = 0.85;
+
+  const annual = bien.surface * basePerM2 * typeFactor * condFactor;
+  return Math.round(annual / 10) * 10; // arrondi aux 10€
 }
 
 function estimateMarketRent(bien) {
@@ -99,13 +181,16 @@ function estimateMarketRent(bien) {
   if (bien.surface < 25) factor = 1.10;
   else if (bien.surface < 35) factor = 1.05;
   else if (bien.surface > 70) factor = 0.92;
+  // Maison : loyer/m² typiquement ~20% plus bas que les apparts
+  // (les marchés MARKET_PRECISE sont calibrés sur les apparts).
+  if (bien.type === "Maison") factor *= 0.80;
   // état impacte aussi
   if (bien.condition === "neuf") factor *= 1.05;
   else if (bien.condition === "rafraichir") factor *= 0.95;
   else if (bien.condition === "travaux") factor *= 0.85;
-  // étage haut sans ascenseur
-  if (bien.floor >= 3 && !bien.elevator) factor *= 0.97;
-  // bonus cave / parking
+  // étage haut sans ascenseur (NA pour maison)
+  if (bien.type !== "Maison" && bien.floor >= 3 && !bien.elevator) factor *= 0.97;
+  // bonus cave / parking / extérieur / piscine
   factor *= annexBonus(bien, "rent");
   const median = (m.rentM2[0] + m.rentM2[1]) / 2;
   return Math.round(median * factor * bien.surface);
@@ -326,7 +411,7 @@ function analyze({ bien, loan, assumptions }) {
 
   // Charges annuelles
   const taxeF = bien.taxe || 0;
-  const chargesNonRecup = bien.charges * 12 * (assumptions.chargesPct / 100);
+  const chargesNonRecup = bien.charges * (assumptions.chargesPct / 100);
   const gestion   = rentAnnual * (assumptions.gestion / 100);
   const pno       = assumptions.pno;
   const vacance   = rentAnnual * (assumptions.vacance / 100);
@@ -508,8 +593,7 @@ function buildRisks(a) {
 
   // Charges copro
   if (b.charges > 0 && b.surface > 0) {
-    const chargesAnnuel = b.charges * 12;
-    const ratio = chargesAnnuel / b.surface;
+    const ratio = b.charges / b.surface;
     if (ratio > 50) risks.push({ level: "med", title: `Charges copro élevées (${fmtEUR(ratio)}/m²/an)`,
       text: "Au-dessus de 50€/m²/an : souvent chauffage collectif, ascenseur, gardien, espaces verts. Impacte directement la rentabilité." });
   }
@@ -869,7 +953,10 @@ function render() {
       : "—";
     $("dvf-tag").textContent = `${dvf.n.toLocaleString("fr-FR")} ventes`;
     const scopeLabel = dvf.label || inp.bien.city;
-    $("dvf-sub").textContent = `Appartements vendus à ${scopeLabel} (DVF 2024-2025) · dernière transaction : ${lastDateFmt}`;
+    const houseNote = inp.bien.type === "Maison"
+      ? ` · <em style="color:var(--warn)">⚠ Comparables apparts uniquement (le marché des maisons diffère)</em>`
+      : "";
+    $("dvf-sub").innerHTML = `Appartements vendus à ${scopeLabel} (DVF 2024-2025) · dernière transaction : ${lastDateFmt}${houseNote}`;
     $("dvf-stats").innerHTML = `
       <div class="dvf-kpi"><div class="dvf-kpi-label">Prix médian</div><div class="dvf-kpi-value">${fmtEUR(dvf.prixMed)}</div></div>
       <div class="dvf-kpi"><div class="dvf-kpi-label">€/m² médian</div><div class="dvf-kpi-value">${fmtEUR(dvf.m2Med)}</div></div>
@@ -1125,6 +1212,7 @@ function setupAutocomplete() {
 const SHARE_IDS = [
   "b-city","b-cp","b-district","b-type","b-surface","b-floor","b-price","b-works",
   "b-rent","b-rent-mode","b-charges","b-taxe","b-elevator","b-cave","b-parking",
+  "b-outdoor","b-outdoor-surface","b-pool",
   "b-dpe","b-ges","b-copro-lots","b-condition",
   "l-apport","l-borrow-notaire","l-rate","l-insurance","l-duration","l-deferred",
   "a-gestion","a-vacance","a-entretien","a-pno","a-charges-pct","a-tmi",
@@ -1678,8 +1766,11 @@ function parseListing(text) {
     }
   }
 
-  // TYPE : "T2", "2 pièces", "Studio", "F3"
-  if (/\bstudio\b/i.test(t)) {
+  // TYPE : "Maison", "Studio", "T2", "F3", "2 pièces"
+  // On teste "maison" en premier car une annonce maison peut aussi mentionner "T4" en pièces.
+  if (/\b(?:maison|villa|pavillon|longere|long[èe]re|chalet|fermette)\b/i.test(t)) {
+    result.type = "Maison";
+  } else if (/\bstudio\b/i.test(t)) {
     result.type = "Studio";
   } else {
     const piecesM = t.match(/\b([TF])\s*([1-9])\b/i) || t.match(/\b([1-9])\s*pi[eè]ces?\b/i);
@@ -1719,13 +1810,16 @@ function parseListing(text) {
     }
   }
 
-  // CHARGES COPRO : "Charges : 120 €/mois" / "Charges mensuelles : 95€"
-  const chargesM = t.match(/charges?\s*(?:copropri[ée]t[ée]|mensuelles?|de\s+copropri[ée]t[ée])?\s*[:\-]?\s*([\d \.,]+)\s*€\s*(?:\/\s*mois|par\s+mois|mensuelles?|\/\s*an|annuelles?|par\s+an)?/i);
+  // CHARGES COPRO : on stocke en annuel (€/an).
+  // "Charges : 120 €/mois" → 120*12 ; "Charges 1800 €/an" → 1800.
+  const chargesM = t.match(/charges?\s*(?:copropri[ée]t[ée]|mensuelles?|annuelles?|de\s+copropri[ée]t[ée])?\s*[:\-]?\s*([\d \.,]+)\s*€\s*(?:\/\s*mois|par\s+mois|mensuelles?|\/\s*an|annuelles?|par\s+an)?/i);
   if (chargesM) {
     const v = parseFrNum(chargesM[1]);
-    const isAnnual = /\/\s*an|annuelles?|par\s+an/i.test(chargesM[0]);
-    if (v && v < 10000) {
-      result.charges = isAnnual ? Math.round(v / 12) : Math.round(v);
+    const isMonthly = /\/\s*mois|par\s+mois|mensuelles?/i.test(chargesM[0]);
+    if (v && v < 30000) {
+      // Heuristique : si pas de mention explicite et valeur <500, probablement mensuel.
+      const treatAsMonthly = isMonthly || (!/\/\s*an|annuelles?|par\s+an/i.test(chargesM[0]) && v < 500);
+      result.charges = treatAsMonthly ? Math.round(v * 12) : Math.round(v);
     }
   }
 
@@ -1777,6 +1871,36 @@ function parseListing(text) {
     }
   }
 
+  // EXTÉRIEUR : jardin > terrasse > balcon (priorité au plus valorisant)
+  // Surface : "terrasse de 15 m²", "jardin 200m²", "balcon 4 m²"
+  function extractOutdoorSurface(keyword) {
+    const re = new RegExp(`${keyword}\\s*(?:de\\s+)?([\\d]+(?:[,.]\\d+)?)\\s*(?:m\\s*[²2])`, "i");
+    const m = t.match(re);
+    if (m) {
+      const v = parseFrNum(m[1]);
+      if (v && v >= 1 && v <= 5000) return Math.round(v);
+    }
+    return null;
+  }
+  if (/\bjardin\b/i.test(tl) && !/(?:sans|pas\s+d['e]\s*|aucun)\s*jardin/i.test(tl)) {
+    result.outdoor = "jardin";
+    const s = extractOutdoorSurface("jardin");
+    if (s) result.outdoorSurface = s;
+  } else if (/\bterrasses?\b/i.test(tl) && !/(?:sans|pas\s+d['e]\s*|aucune)\s*terrasse/i.test(tl)) {
+    result.outdoor = "terrasse";
+    const s = extractOutdoorSurface("terrasses?");
+    if (s) result.outdoorSurface = s;
+  } else if (/\bbalcons?\b/i.test(tl) && !/(?:sans|pas\s+d['e]\s*|aucun)\s*balcon/i.test(tl)) {
+    result.outdoor = "balcon";
+    const s = extractOutdoorSurface("balcons?");
+    if (s) result.outdoorSurface = s;
+  }
+
+  // PISCINE
+  if (/\bpiscines?\b/i.test(tl) && !/(?:sans|pas\s+d['e]\s*|aucune)\s*piscine/i.test(tl)) {
+    result.pool = true;
+  }
+
   // LOTS COPROPRIÉTÉ : "56 lots", "copropriété de 120 lots"
   const lotsM = t.match(/(?:copropri[ée]t[ée]\s+(?:de|comprenant|comportant)?\s*|nombre\s+de\s+lots\s*[:\-]?\s*)(\d{1,4})\s*lots?/i)
              || t.match(/(\d{1,4})\s*lots?\b/i);
@@ -1806,11 +1930,14 @@ const IMPORT_FIELD_LABELS = {
   surface:    "Surface (m²)",
   floor:      "Étage",
   price:      "Prix d'achat (€)",
-  charges:    "Charges copro (€/mois)",
+  charges:    "Charges copro (€/an)",
   taxe:       "Taxe foncière (€/an)",
   elevator:   "Ascenseur",
   cave:       "Cave",
   parking:    "Parking",
+  outdoor:        "Extérieur",
+  outdoorSurface: "Surface extérieur (m²)",
+  pool:           "Piscine",
   dpe:        "DPE",
   ges:        "GES",
   coproLots:  "Lots copropriété",
@@ -1821,9 +1948,11 @@ function formatImportValue(field, v) {
   if (v === true) return "Oui";
   if (v === false) return "Non";
   if (field === "parking") return { none: "Aucun", private: "Place privative", box: "Box fermé" }[v] || v;
+  if (field === "outdoor") return { none: "Aucun", balcon: "Balcon", terrasse: "Terrasse", jardin: "Jardin" }[v] || v;
+  if (field === "outdoorSurface") return v + " m²";
   if (field === "condition") return { neuf: "Refait à neuf", bon: "Bon état", rafraichir: "À rafraîchir", travaux: "Gros travaux" }[v] || v;
   if (field === "price" || field === "taxe") return Number(v).toLocaleString("fr-FR") + " €";
-  if (field === "charges") return v + " €/mois";
+  if (field === "charges") return Number(v).toLocaleString("fr-FR") + " €/an";
   if (field === "surface") return v + " m²";
   return String(v);
 }
@@ -1888,6 +2017,9 @@ function applyImportToForm() {
     elevator:  { id: "b-elevator",   set: v => $("b-elevator").value = v ? "true" : "false" },
     cave:      { id: "b-cave",       set: v => $("b-cave").value = v ? "true" : "false" },
     parking:   { id: "b-parking",    set: v => $("b-parking").value = v },
+    outdoor:        { id: "b-outdoor",         set: v => $("b-outdoor").value = v },
+    outdoorSurface: { id: "b-outdoor-surface", set: v => $("b-outdoor-surface").value = v },
+    pool:           { id: "b-pool",            set: v => $("b-pool").value = v ? "true" : "false" },
     dpe:       { id: "b-dpe",        set: v => $("b-dpe").value = v },
     ges:       { id: "b-ges",        set: v => $("b-ges").value = v },
     coproLots: { id: "b-copro-lots", set: v => $("b-copro-lots").value = v },
@@ -1995,6 +2127,28 @@ function init() {
   if (importApply) importApply.addEventListener("click", applyImportToForm);
   const importCancel = $("import-cancel");
   if (importCancel) importCancel.addEventListener("click", () => { $("import-preview").hidden = true; });
+
+  // Bouton "Estimer" pour la taxe foncière
+  const taxeBtn = $("btn-estimate-taxe");
+  if (taxeBtn) {
+    taxeBtn.addEventListener("click", () => {
+      const inp = readInputs();
+      const est = estimateTaxeFonciere(inp.bien);
+      if (est === null || !inp.bien.surface) {
+        alert("Renseignez la surface du bien avant d'estimer.");
+        return;
+      }
+      const taxeField = $("b-taxe");
+      if (taxeField) {
+        taxeField.value = est;
+        render();
+        syncURL();
+        // Feedback visuel court
+        taxeBtn.textContent = "✓ Estimé";
+        setTimeout(() => { taxeBtn.textContent = "Estimer"; }, 1200);
+      }
+    });
+  }
   const importClear = $("import-clear");
   if (importClear) importClear.addEventListener("click", () => { $("import-text").value = ""; $("import-preview").hidden = true; });
   const importOverlay = $("import-overlay");

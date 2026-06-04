@@ -565,6 +565,21 @@ html, body {
 .proj-kpi-value.pos { color: var(--good); }
 .proj-kpi-value.neg { color: var(--bad); }
 
+/* TAX BADGE */
+.tax-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+.tax-badge.neu  { background: var(--bg-soft); color: var(--text-soft); }
+.tax-badge.good { background: var(--good-soft); color: var(--good); }
+
 /* OPTIMAL SELL YEAR */
 .optsell-grid {
   display: grid;

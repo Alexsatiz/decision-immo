@@ -69,6 +69,10 @@ function readInputs() {
       pno:       num("a-pno"),
       chargesPct:num("a-charges-pct"),
       tmi:       num("a-tmi"),
+      amortBatiPct:    num("a-amort-bati-pct"),
+      amortBatiDuree:  num("a-amort-bati-duree"),
+      amortMobPct:     num("a-amort-mob-pct"),
+      amortMobDuree:   num("a-amort-mob-duree"),
     }
   };
 }
@@ -302,8 +306,9 @@ function analyze({ bien, loan, assumptions }) {
 
   // Loyer effectif (auto-estimé si vide)
   const marketRent = estimateMarketRent(bien);
+  const isMeuble = bien.rentMode === "meuble" || bien.rentMode === "lmnp-reel";
   let baseRent = bien.rent || marketRent;
-  if (bien.rentMode === "meuble") baseRent = Math.round(baseRent * (1 + MEUBLE_BONUS));
+  if (isMeuble) baseRent = Math.round(baseRent * (1 + MEUBLE_BONUS));
 
   const rentAnnual = baseRent * 12;
 
@@ -335,13 +340,51 @@ function analyze({ bien, loan, assumptions }) {
 
   const cashflowPre = rentNetMonthly - loanComp.monthlyTotal;
 
-  // Cash-flow après impôts (approximation simple)
-  // Vide : micro-foncier abattement 30% sur loyer brut
-  // Meublé : micro-BIC abattement 50%
-  const ab = bien.rentMode === "meuble" ? ABATTEMENT_LMNP : ABATTEMENT_VIDE;
-  const taxableAnnual = Math.max(0, rentAnnual * (1 - ab));
+  // Cash-flow après impôts (selon régime fiscal)
   const taxRate = (assumptions.tmi + 17.2) / 100; // TMI + prélèvements sociaux
-  const taxAnnual = taxableAnnual * taxRate;
+  let taxAnnual = 0;
+  let taxDetails = null;
+
+  if (bien.rentMode === "lmnp-reel") {
+    // LMNP régime réel : on déduit charges réelles + intérêts d'emprunt + amortissements
+    // L'amortissement bâti et mobilier sont calculés en linéaire.
+    // Les intérêts varient chaque année → on prend la moyenne sur durée du prêt
+    //   (ou sur l'horizon stable des 10 premières années si durée > 10).
+    const amortBati = (bien.price * (assumptions.amortBatiPct / 100)) / Math.max(1, assumptions.amortBatiDuree);
+    const amortMob  = (bien.price * (assumptions.amortMobPct  / 100)) / Math.max(1, assumptions.amortMobDuree);
+    const amortAnnual = amortBati + amortMob;
+
+    // Intérêts moyens sur la durée du prêt (intérêts totaux / durée)
+    const interestsTotal = (loanComp.monthly * 12 * loan.duration) - toBorrow;
+    const interestsAvg = loan.duration > 0 ? Math.max(0, interestsTotal / loan.duration) : 0;
+    const insuranceAnnual = loanComp.monthlyInsurance * 12;
+
+    // Charges déductibles : tout sauf vacance (la vacance = manque à gagner, déjà reflété dans les revenus réels)
+    const chargesDeductibles = taxeF + chargesNonRecup + gestion + pno + entretien;
+
+    const resultatBic = rentAnnual - chargesDeductibles - interestsAvg - insuranceAnnual - amortAnnual;
+    // En LMNP, l'amortissement ne peut pas créer de déficit : il est plafonné au résultat avant amortissement.
+    const resultatAvantAmort = rentAnnual - chargesDeductibles - interestsAvg - insuranceAnnual;
+    const amortDeductible = Math.min(amortAnnual, Math.max(0, resultatAvantAmort));
+    const resultatFiscal = Math.max(0, resultatAvantAmort - amortDeductible);
+    taxAnnual = resultatFiscal * taxRate;
+
+    taxDetails = {
+      regime: "lmnp-reel",
+      amortBati, amortMob, amortAnnual, amortDeductible,
+      interestsAvg, insuranceAnnual,
+      chargesDeductibles,
+      resultatAvantAmort,
+      resultatFiscal,
+    };
+  } else {
+    // Vide : micro-foncier abattement 30% sur loyer brut
+    // Meublé : micro-BIC abattement 50%
+    const ab = isMeuble ? ABATTEMENT_LMNP : ABATTEMENT_VIDE;
+    const taxableAnnual = Math.max(0, rentAnnual * (1 - ab));
+    taxAnnual = taxableAnnual * taxRate;
+    taxDetails = { regime: bien.rentMode, abattement: ab, taxableAnnual };
+  }
   const cashflowPost = cashflowPre - taxAnnual / 12;
 
   // Loyer d'équilibre (avant impôts, sur cash-flow nul)
@@ -369,6 +412,7 @@ function analyze({ bien, loan, assumptions }) {
     breakEvenRent,
     effortTotal,
     taxAnnual,
+    taxDetails,
   };
 }
 
@@ -486,14 +530,24 @@ function buildOptimisations(a) {
   const opti = [];
   const b = a.bien;
 
-  // Meublé
+  // Meublé / LMNP
   if (b.rentMode === "vide") {
     const rentMeuble = Math.round(a.baseRent * (1 + MEUBLE_BONUS));
     const gainAnnuel = (rentMeuble - a.baseRent) * 12;
     opti.push({
       title: "Passer en location meublée (LMNP)",
-      text: `Loyer +${fmtPct(MEUBLE_BONUS * 100, 0)} → ${fmtEUR(rentMeuble)}/mois (+${fmtEUR(gainAnnuel)}/an). Régime micro-BIC : abattement 50% (vs 30% en vide). Possibilité d'amortissement comptable au régime réel pour neutraliser l'IR pendant 8-12 ans.`
+      text: `Loyer +${fmtPct(MEUBLE_BONUS * 100, 0)} → ${fmtEUR(rentMeuble)}/mois (+${fmtEUR(gainAnnuel)}/an). Micro-BIC : abattement 50% (vs 30% en vide). Régime réel : amortissement du bien qui neutralise l'IR pendant 8-15 ans — testez les 3 modes via le sélecteur "Mode location".`
     });
+  } else if (b.rentMode === "meuble") {
+    // Estimer le gain en passant en LMNP réel : impôt micro-BIC actuel vs ~0 en réel pendant des années
+    const tmiTotal = a.assumptions.tmi + 17.2;
+    const taxMicroBic = a.taxAnnual;
+    if (taxMicroBic > 200) {
+      opti.push({
+        title: "Passer au régime réel LMNP",
+        text: `Vous économiseriez environ ${fmtEUR(taxMicroBic)}/an d'impôts (TMI ${tmiTotal.toFixed(1)}%) tant que les amortissements absorbent le résultat — typiquement 10-15 ans. Bascule via "Mode location → LMNP régime réel" pour simuler.`
+      });
+    }
   }
 
   // Apport supplémentaire
@@ -723,6 +777,41 @@ function render() {
   $("d-cf-post").textContent = fmtEUR(a.cashflowPost);
   $("d-be").textContent = fmtEUR(a.breakEvenRent);
 
+  // DÉTAIL FISCAL
+  const td = a.taxDetails;
+  const regimeLabel = {
+    "vide":      { name: "Micro-foncier (vide)", cls: "neu" },
+    "meuble":    { name: "Micro-BIC (meublé)",   cls: "neu" },
+    "lmnp-reel": { name: "LMNP régime réel",     cls: "good" },
+  }[td.regime] || { name: "—", cls: "neu" };
+  $("tax-badge").textContent = regimeLabel.name;
+  $("tax-badge").className = `tax-badge ${regimeLabel.cls}`;
+
+  const tmiTotal = a.assumptions.tmi + 17.2;
+  if (td.regime === "lmnp-reel") {
+    $("tax-grid").innerHTML = `
+      <div class="detail-row"><span>Loyer annuel</span><strong>${fmtEUR(a.rentAnnual)}</strong></div>
+      <div class="detail-row"><span>− Charges déductibles (gestion, taxe, copro, PNO, entretien)</span><strong>− ${fmtEUR(td.chargesDeductibles)}</strong></div>
+      <div class="detail-row"><span>− Intérêts d'emprunt (moyenne sur ${a.loan.duration} ans)</span><strong>− ${fmtEUR(td.interestsAvg)}</strong></div>
+      <div class="detail-row"><span>− Assurance emprunteur</span><strong>− ${fmtEUR(td.insuranceAnnual)}</strong></div>
+      <div class="detail-row"><span>= Résultat avant amortissements</span><strong>${fmtEUR(td.resultatAvantAmort)}</strong></div>
+      <div class="detail-row"><span>− Amortissement bâti (${a.assumptions.amortBatiPct}% × prix / ${a.assumptions.amortBatiDuree} ans)</span><strong>− ${fmtEUR(td.amortBati)}</strong></div>
+      <div class="detail-row"><span>− Amortissement mobilier (${a.assumptions.amortMobPct}% × prix / ${a.assumptions.amortMobDuree} ans)</span><strong>− ${fmtEUR(td.amortMob)}</strong></div>
+      <div class="detail-row"><span>Amortissement réellement déduit (plafonné au résultat)</span><strong>− ${fmtEUR(td.amortDeductible)}</strong></div>
+      <div class="detail-row sep strong"><span>Résultat fiscal imposable</span><strong>${fmtEUR(td.resultatFiscal)}</strong></div>
+      <div class="detail-row"><span>Impôt + prélèvements sociaux (${tmiTotal.toFixed(1)}%)</span><strong>${fmtEUR(a.taxAnnual)} / an</strong></div>
+      ${td.amortDeductible < td.amortAnnual ? `<div class="detail-row"><span class="muted small">Excédent d'amortissement reporté : ${fmtEUR(td.amortAnnual - td.amortDeductible)}/an (utilisable les années suivantes)</span></div>` : ""}
+    `;
+  } else {
+    const ab = td.abattement || 0;
+    $("tax-grid").innerHTML = `
+      <div class="detail-row"><span>Loyer annuel imposable</span><strong>${fmtEUR(a.rentAnnual)}</strong></div>
+      <div class="detail-row"><span>Abattement forfaitaire</span><strong>− ${(ab * 100).toFixed(0)}%</strong></div>
+      <div class="detail-row sep strong"><span>Base imposable</span><strong>${fmtEUR(td.taxableAnnual)}</strong></div>
+      <div class="detail-row"><span>Impôt + prélèvements sociaux (${tmiTotal.toFixed(1)}%)</span><strong>${fmtEUR(a.taxAnnual)} / an</strong></div>
+    `;
+  }
+
   // MARKET
   const market = getMarket(inp.bien.city, SELECTED_COMMUNE);
   if (market) {
@@ -933,11 +1022,11 @@ function showEmpty() {
       <p>Renseignez au minimum la <strong>ville</strong>, la <strong>surface</strong> et le <strong>prix</strong> pour générer l'analyse.</p>
     </div>
   `;
-  ["kpi-block", "finance-block", "projection-block", "optsell-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = true);
+  ["kpi-block", "finance-block", "tax-block", "projection-block", "optsell-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = true);
 }
 
 function showAll() {
-  ["kpi-block", "finance-block", "projection-block", "optsell-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = false);
+  ["kpi-block", "finance-block", "tax-block", "projection-block", "optsell-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = false);
 }
 
 /* ============================================================
@@ -1027,6 +1116,7 @@ const SHARE_IDS = [
   "b-dpe","b-ges","b-copro-lots","b-condition",
   "l-apport","l-borrow-notaire","l-rate","l-insurance","l-duration","l-deferred",
   "a-gestion","a-vacance","a-entretien","a-pno","a-charges-pct","a-tmi",
+  "a-amort-bati-pct","a-amort-bati-duree","a-amort-mob-pct","a-amort-mob-duree",
   "p-horizon",
 ];
 

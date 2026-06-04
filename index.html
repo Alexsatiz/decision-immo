@@ -284,6 +284,19 @@
       </div>
     </article>
 
+    <!-- PROJECTION PATRIMONIALE -->
+    <article class="card" id="projection-block" hidden>
+      <h3>Projection patrimoniale</h3>
+      <p class="muted small">Hors fiscalité — cohérent avec le cash-flow ci-dessus.</p>
+
+      <div class="proj-horizon">
+        <label for="p-horizon">Horizon de projection : <strong id="p-horizon-val">15</strong> ans</label>
+        <input type="range" id="p-horizon" min="1" max="30" step="1" value="15" />
+      </div>
+
+      <div class="proj-grid" id="proj-grid"></div>
+    </article>
+
     <!-- COMPARAISON MARCHÉ -->
     <article class="card" id="market-block" hidden>
       <h3>Comparaison marché local</h3>

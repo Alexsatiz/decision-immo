@@ -155,6 +155,95 @@ function buildAmort(amount, rate, duration, comp, deferred) {
 }
 
 /* ============================================================
+   PROJECTION PATRIMONIALE — helpers
+   ============================================================ */
+
+function paymentForYear(y, comp, loan) {
+  if (y > loan.duration) return 0;
+  if (loan.deferred && y <= 2) return comp.deferredMonthly;
+  return comp.monthlyTotal;
+}
+
+function remainingBalance(amort, N) {
+  if (N <= 0) return amort[0]?.startBal ?? 0;
+  if (N >= amort.length) return 0;
+  const row = amort[N - 1];
+  return row ? Math.max(0, row.startBal - row.principal) : 0;
+}
+
+function npv(rate, flows) {
+  let s = 0;
+  for (let t = 0; t < flows.length; t++) s += flows[t] / Math.pow(1 + rate, t);
+  return s;
+}
+function npvDeriv(rate, flows) {
+  let s = 0;
+  for (let t = 1; t < flows.length; t++) s += -t * flows[t] / Math.pow(1 + rate, t + 1);
+  return s;
+}
+
+function irr(flows) {
+  const positives = flows.some(f => f > 0);
+  const negatives = flows.some(f => f < 0);
+  if (!positives || !negatives) return null;
+
+  let r = 0.05;
+  for (let i = 0; i < 50; i++) {
+    const f = npv(r, flows);
+    const fp = npvDeriv(r, flows);
+    if (!isFinite(f) || !isFinite(fp) || fp === 0) break;
+    const step = f / fp;
+    if (Math.abs(step) > 0.5) break;
+    const next = r - step;
+    if (next <= -0.999) break;
+    if (Math.abs(step) < 1e-7) return next * 100;
+    r = next;
+  }
+  const probes = [-0.95, -0.5, -0.1, 0, 0.05, 0.20, 0.50, 1.0, 3.0];
+  let lo = null, hi = null;
+  for (let i = 0; i < probes.length - 1; i++) {
+    const a = npv(probes[i], flows), b = npv(probes[i + 1], flows);
+    if (isFinite(a) && isFinite(b) && a * b < 0) { lo = probes[i]; hi = probes[i + 1]; break; }
+  }
+  if (lo === null) return null;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    const fm = npv(mid, flows);
+    if (Math.abs(fm) < 1e-7) return mid * 100;
+    if (npv(lo, flows) * fm < 0) hi = mid; else lo = mid;
+  }
+  return ((lo + hi) / 2) * 100;
+}
+
+function buildProjection(a, horizonYears, growthPct) {
+  const g = growthPct / 100;
+  const N = horizonYears;
+  const amort = buildAmort(a.toBorrow, a.loan.rate, a.loan.duration, a.loanComp, a.loan.deferred);
+
+  const initialOutflow = a.loan.apport + (a.loan.borrowNotaire ? 0 : a.fraisNotaire);
+  const flows = [-initialOutflow];
+
+  let cumCF = 0;
+  for (let y = 1; y <= N; y++) {
+    const monthlyPay = paymentForYear(y, a.loanComp, a.loan);
+    const annualCF = (a.rentNetMonthly - monthlyPay) * 12;
+    cumCF += annualCF;
+    flows.push(annualCF);
+  }
+
+  const projectedValue = a.bien.price * Math.pow(1 + g, N);
+  const balance = remainingBalance(amort, N);
+  const sale = projectedValue - balance;
+  flows[flows.length - 1] += sale;
+
+  const netWealth = projectedValue - balance;
+  const grossGain = projectedValue - a.bien.price;
+  const tri = irr(flows);
+
+  return { growthPct, projectedValue, balance, netWealth, grossGain, cumCF, tri };
+}
+
+/* ============================================================
    ANALYSE FINANCIÈRE
    ============================================================ */
 
@@ -625,6 +714,36 @@ function render() {
     </div>
   `).join("");
 
+  // PROJECTION PATRIMONIALE
+  const horizon = +$("p-horizon").value || 15;
+  $("p-horizon-val").textContent = horizon;
+  const scenarios = [
+    { key: "pess", label: "Pessimiste", g: 0 },
+    { key: "med",  label: "Médian",     g: 2 },
+    { key: "opt",  label: "Optimiste",  g: 4 },
+  ];
+  $("proj-grid").innerHTML = scenarios.map(s => {
+    const p = buildProjection(a, horizon, s.g);
+    const triTxt = p.tri === null ? "—" : fmtPct(p.tri);
+    const triCls = p.tri === null ? "" : (p.tri >= 5 ? "pos" : p.tri >= 0 ? "" : "neg");
+    return `
+      <div class="proj-scenario ${s.key}">
+        <div class="proj-scenario-head">
+          <span class="proj-scenario-name">${s.label}</span>
+          <span class="proj-scenario-rate">+${s.g}% / an</span>
+        </div>
+        <div class="proj-kpi"><span class="proj-kpi-label">Patrimoine net</span>
+          <span class="proj-kpi-value ${p.netWealth >= 0 ? "pos" : "neg"}">${fmtEUR(p.netWealth)}</span></div>
+        <div class="proj-kpi"><span class="proj-kpi-label">Plus-value brute</span>
+          <span class="proj-kpi-value ${p.grossGain >= 0 ? "pos" : "neg"}">${fmtEUR(p.grossGain)}</span></div>
+        <div class="proj-kpi"><span class="proj-kpi-label">Cash-flow cumulé</span>
+          <span class="proj-kpi-value ${p.cumCF >= 0 ? "pos" : "neg"}">${fmtEUR(p.cumCF)}</span></div>
+        <div class="proj-kpi"><span class="proj-kpi-label">TRI annualisé</span>
+          <span class="proj-kpi-value ${triCls}">${triTxt}</span></div>
+      </div>
+    `;
+  }).join("");
+
   // AMORTISSEMENT
   const amort = buildAmort(a.toBorrow, inp.loan.rate, inp.loan.duration, a.loanComp, inp.loan.deferred);
   $("amort-tbody").innerHTML = amort.map(r => `
@@ -647,11 +766,11 @@ function showEmpty() {
       <p>Renseignez au minimum la <strong>ville</strong>, la <strong>surface</strong> et le <strong>prix</strong> pour générer l'analyse.</p>
     </div>
   `;
-  ["kpi-block", "finance-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = true);
+  ["kpi-block", "finance-block", "projection-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = true);
 }
 
 function showAll() {
-  ["kpi-block", "finance-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = false);
+  ["kpi-block", "finance-block", "projection-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = false);
 }
 
 /* ============================================================

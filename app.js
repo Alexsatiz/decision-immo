@@ -33,12 +33,16 @@ let SELECTED_COMMUNE = null; // { nom, code, codeDepartement, population, centre
    ============================================================ */
 
 function readInputs() {
+  const kind = val("b-kind");           // "Appartement" | "Maison"
+  const rooms = val("b-rooms");          // "Studio" | "T1"…"T5+"
   return {
     bien: {
       city: val("b-city"),
       cp: val("b-cp"),
       district: val("b-district"),
-      type: val("b-type"),
+      kind,                              // catégorie : Appartement | Maison
+      rooms,                             // typologie : Studio / T1-T5+
+      type: kind,                        // alias rétro-compat (logique métier teste bien.type === "Maison")
       surface: num("b-surface"),
       floor: num("b-floor"),
       price: num("b-price"),
@@ -1210,7 +1214,7 @@ function setupAutocomplete() {
 
 // IDs de tous les inputs à conserver (mêmes que readInputs + slider projection)
 const SHARE_IDS = [
-  "b-city","b-cp","b-district","b-type","b-surface","b-floor","b-price","b-works",
+  "b-city","b-cp","b-district","b-kind","b-rooms","b-surface","b-floor","b-price","b-works",
   "b-rent","b-rent-mode","b-charges","b-taxe","b-elevator","b-cave","b-parking",
   "b-outdoor","b-outdoor-surface","b-pool",
   "b-dpe","b-ges","b-copro-lots","b-condition",
@@ -1256,6 +1260,16 @@ function decodeState(hash) {
 
 function applyState(state) {
   if (!state) return;
+  // Migration douce : ancien champ b-type → b-kind + b-rooms (URL/sauvegardes pré-refonte)
+  if (state["b-type"] !== undefined && state["b-kind"] === undefined) {
+    if (state["b-type"] === "Maison") {
+      state["b-kind"] = "Maison";
+    } else {
+      state["b-kind"] = "Appartement";
+      if (state["b-rooms"] === undefined) state["b-rooms"] = state["b-type"];
+    }
+    delete state["b-type"];
+  }
   for (const id of SHARE_IDS) {
     if (state[id] === undefined) continue;
     const el = $(id);
@@ -1766,17 +1780,19 @@ function parseListing(text) {
     }
   }
 
-  // TYPE : "Maison", "Studio", "T2", "F3", "2 pièces"
-  // On teste "maison" en premier car une annonce maison peut aussi mentionner "T4" en pièces.
+  // CATÉGORIE : Maison vs Appartement (on ne touche kind que si Maison détectée,
+  // pour ne pas écraser le défaut Appartement du formulaire avec un texte ambigu)
   if (/\b(?:maison|villa|pavillon|longere|long[èe]re|chalet|fermette)\b/i.test(t)) {
-    result.type = "Maison";
-  } else if (/\bstudio\b/i.test(t)) {
-    result.type = "Studio";
+    result.kind = "Maison";
+  }
+  // PIÈCES : Studio / T1-T5+
+  if (/\bstudio\b/i.test(t)) {
+    result.rooms = "Studio";
   } else {
     const piecesM = t.match(/\b([TF])\s*([1-9])\b/i) || t.match(/\b([1-9])\s*pi[eè]ces?\b/i);
     if (piecesM) {
       const n = parseInt(piecesM[2] || piecesM[1], 10);
-      result.type = n === 1 ? "T1" : n >= 5 ? "T5+" : `T${n}`;
+      result.rooms = n === 1 ? "T1" : n >= 5 ? "T5+" : `T${n}`;
     }
   }
 
@@ -1926,7 +1942,8 @@ function parseListing(text) {
 const IMPORT_FIELD_LABELS = {
   city:       "Ville",
   cp:         "Code postal",
-  type:       "Type",
+  kind:       "Catégorie",
+  rooms:      "Pièces",
   surface:    "Surface (m²)",
   floor:      "Étage",
   price:      "Prix d'achat (€)",
@@ -2008,7 +2025,8 @@ function applyImportToForm() {
   const map = {
     city:      { id: "b-city",       set: v => $("b-city").value = v },
     cp:        { id: "b-cp",         set: v => $("b-cp").value = v },
-    type:      { id: "b-type",       set: v => $("b-type").value = v },
+    kind:      { id: "b-kind",       set: v => $("b-kind").value = v },
+    rooms:     { id: "b-rooms",      set: v => $("b-rooms").value = v },
     surface:   { id: "b-surface",    set: v => $("b-surface").value = v },
     floor:     { id: "b-floor",      set: v => $("b-floor").value = v },
     price:     { id: "b-price",      set: v => $("b-price").value = v },

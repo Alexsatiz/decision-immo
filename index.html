@@ -69,19 +69,28 @@
         </div>
       </div>
 
-      <div class="grid-3">
+      <div class="grid-2">
         <div class="field">
-          <label for="b-type">Type</label>
-          <select id="b-type">
-            <option value="Studio">Studio (appart)</option>
-            <option value="T1">T1 (appart)</option>
-            <option value="T2" selected>T2 (appart)</option>
-            <option value="T3">T3 (appart)</option>
-            <option value="T4">T4 (appart)</option>
-            <option value="T5+">T5+ (appart)</option>
+          <label for="b-kind">Catégorie</label>
+          <select id="b-kind">
+            <option value="Appartement" selected>Appartement</option>
             <option value="Maison">Maison</option>
           </select>
         </div>
+        <div class="field">
+          <label for="b-rooms">Pièces</label>
+          <select id="b-rooms">
+            <option value="Studio">Studio</option>
+            <option value="T1">T1</option>
+            <option value="T2" selected>T2</option>
+            <option value="T3">T3</option>
+            <option value="T4">T4</option>
+            <option value="T5+">T5+</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2">
         <div class="field">
           <label for="b-surface">Surface (m²)</label>
           <input type="number" id="b-surface" min="0" step="0.5" placeholder="ex: 35" />

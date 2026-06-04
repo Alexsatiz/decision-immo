@@ -36,6 +36,7 @@ function readInputs() {
   return {
     bien: {
       city: val("b-city"),
+      cp: val("b-cp"),
       district: val("b-district"),
       type: val("b-type"),
       surface: num("b-surface"),
@@ -91,7 +92,7 @@ function annexBonus(bien, kind) {
 }
 
 function estimateMarketRent(bien) {
-  const m = getMarket(bien.city, SELECTED_COMMUNE);
+  const m = getMarket(bien.city, SELECTED_COMMUNE, bien.cp);
   if (!m || !bien.surface) return 0;
   // surface impacte le €/m² : petites surfaces louent + cher au m²
   let factor = 1;
@@ -421,7 +422,7 @@ function analyze({ bien, loan, assumptions }) {
    ============================================================ */
 
 function compareToMarket(a) {
-  const m = getMarket(a.bien.city, SELECTED_COMMUNE);
+  const m = getMarket(a.bien.city, SELECTED_COMMUNE, a.bien.cp);
   if (!m) return [];
 
   const pricem2 = a.bien.price / a.bien.surface;
@@ -462,7 +463,7 @@ function compareToMarket(a) {
 function buildRisks(a) {
   const risks = [];
   const b = a.bien;
-  const m = getMarket(b.city, SELECTED_COMMUNE);
+  const m = getMarket(b.city, SELECTED_COMMUNE, b.cp);
 
   // DPE
   if (b.dpe === "G") risks.push({ level: "high", title: "DPE G — Interdit à la location",
@@ -581,7 +582,7 @@ function buildOptimisations(a) {
   }
 
   // Parking absent en zone tendue
-  const mForOpti = getMarket(b.city, SELECTED_COMMUNE);
+  const mForOpti = getMarket(b.city, SELECTED_COMMUNE, b.cp);
   if (b.parking === "none" && mForOpti && mForOpti.tension >= 4) {
     opti.push({
       title: "Acquérir une place de parking annexe",
@@ -596,7 +597,7 @@ function buildOptimisations(a) {
   }
 
   // Négociation
-  const m = getMarket(b.city, SELECTED_COMMUNE);
+  const m = getMarket(b.city, SELECTED_COMMUNE, b.cp);
   if (m && b.surface > 0) {
     const pm = b.price / b.surface;
     if (pm > m.priceM2[0] && (b.condition === "rafraichir" || b.condition === "travaux" || b.dpe === "E" || b.dpe === "F")) {
@@ -633,7 +634,7 @@ function buildOptimisations(a) {
 
 function buildVerdict(a) {
   const b = a.bien;
-  const m = getMarket(b.city, SELECTED_COMMUNE);
+  const m = getMarket(b.city, SELECTED_COMMUNE, b.cp);
 
   let score = 50;
   const pos = [], neg = [], neu = [];
@@ -813,7 +814,7 @@ function render() {
   }
 
   // MARKET
-  const market = getMarket(inp.bien.city, SELECTED_COMMUNE);
+  const market = getMarket(inp.bien.city, SELECTED_COMMUNE, inp.bien.cp);
   if (market) {
     const badge = market.estimated
       ? `<span class="market-source-badge estimated">Estimation</span>`
@@ -821,8 +822,9 @@ function render() {
     const popInfo = market.estimated && SELECTED_COMMUNE
       ? `Population ${SELECTED_COMMUNE.population.toLocaleString("fr-FR")} hab. · Dépt ${SELECTED_COMMUNE.codeDepartement}${market.zone ? ` · Zone ${market.zone}` : ""}<br>`
       : "";
+    const cityLabel = market.arrondissement || inp.bien.city;
     $("market-city").innerHTML =
-      `${inp.bien.city} ${badge}<br>${popInfo}` +
+      `${cityLabel} ${badge}<br>${popInfo}` +
       `Tension locative ${"●".repeat(market.tension)}${"○".repeat(5-market.tension)} · ${market.profile}<br>` +
       `<strong>Transports :</strong> ${market.transports} · <strong>Risque :</strong> ${market.risk}`;
     const bars = compareToMarket(a);
@@ -846,7 +848,7 @@ function render() {
           </div>
           <div class="market-bar-foot">
             <span>${fmtEUR(lo)}</span>
-            <span>marché ${inp.bien.city}</span>
+            <span>marché ${cityLabel}</span>
             <span>${fmtEUR(hi)}</span>
           </div>
           <div class="market-bar-comment">${bar.comment}</div>
@@ -859,14 +861,15 @@ function render() {
   }
 
   // DVF — Comparables réels
-  const dvf = getDVF(inp.bien.city);
+  const dvf = getDVF(inp.bien.city, inp.bien.cp);
   if (dvf) {
     $("dvf-block").hidden = false;
     const lastDateFmt = dvf.lastDate
       ? new Date(dvf.lastDate).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })
       : "—";
     $("dvf-tag").textContent = `${dvf.n.toLocaleString("fr-FR")} ventes`;
-    $("dvf-sub").textContent = `Appartements vendus en ${inp.bien.city} (DVF 2024-2025) · dernière transaction : ${lastDateFmt}`;
+    const scopeLabel = dvf.label || inp.bien.city;
+    $("dvf-sub").textContent = `Appartements vendus à ${scopeLabel} (DVF 2024-2025) · dernière transaction : ${lastDateFmt}`;
     $("dvf-stats").innerHTML = `
       <div class="dvf-kpi"><div class="dvf-kpi-label">Prix médian</div><div class="dvf-kpi-value">${fmtEUR(dvf.prixMed)}</div></div>
       <div class="dvf-kpi"><div class="dvf-kpi-label">€/m² médian</div><div class="dvf-kpi-value">${fmtEUR(dvf.m2Med)}</div></div>
@@ -1052,6 +1055,15 @@ function setupAutocomplete() {
   function selectCommune(c) {
     SELECTED_COMMUNE = c;
     input.value = c.nom;
+    // Pré-remplit le code postal si la commune en a 1 seul (sinon laisse vide,
+    // utile pour Paris/Lyon/Marseille à plusieurs CP que l'utilisateur précise).
+    const cpField = $("b-cp");
+    if (cpField && Array.isArray(c.codesPostaux) && c.codesPostaux.length === 1) {
+      cpField.value = c.codesPostaux[0];
+    } else if (cpField && !cpField.value && Array.isArray(c.codesPostaux) && c.codesPostaux.length > 1) {
+      // Plusieurs CP (Paris/Lyon/Marseille) → on laisse vide pour invitation
+      // mais on n'efface pas une valeur déjà saisie.
+    }
     if (MARKET_PRECISE[c.nom]) {
       hint.innerHTML = `<span style="color:var(--good)">● Données de marché précises</span>`;
     } else {
@@ -1111,7 +1123,7 @@ function setupAutocomplete() {
 
 // IDs de tous les inputs à conserver (mêmes que readInputs + slider projection)
 const SHARE_IDS = [
-  "b-city","b-district","b-type","b-surface","b-floor","b-price","b-works",
+  "b-city","b-cp","b-district","b-type","b-surface","b-floor","b-price","b-works",
   "b-rent","b-rent-mode","b-charges","b-taxe","b-elevator","b-cave","b-parking",
   "b-dpe","b-ges","b-copro-lots","b-condition",
   "l-apport","l-borrow-notaire","l-rate","l-insurance","l-duration","l-deferred",
@@ -1685,10 +1697,26 @@ function parseListing(text) {
       break;
     }
   }
-  // Code postal → département → suggestion fallback
-  if (!result.city) {
-    const cpM = t.match(/\b(75|77|78|91|92|93|94|95|13|33|31|59|44|67|35|06|34|38|69)\d{3}\b/);
-    if (cpM) result._cpHint = cpM[0];
+  // CODE POSTAL : on cherche toujours, car même avec ville=Paris on veut l'arrondissement.
+  // (?<!\d)...(?!\d) assure qu'on ne capture pas un sous-segment d'un long numéro (RSAC, SIRET).
+  const cpM = t.match(/(?<!\d)(0[1-9]|[1-8]\d|9[0-5]|97[1-6]|98[4-9])\d{3}(?!\d)/);
+  if (cpM) result.cp = cpM[0];
+
+  // Heuristique d'arrondissement : "Paris 18ème", "18e arrondissement", "Lyon 7e", etc.
+  // Utile quand l'annonce mentionne l'arrondissement sans CP explicite.
+  if (!result.cp && result.city) {
+    const arrM = t.match(/\b(\d{1,2})\s*(?:e|er|[èeé]me|ème)?\s*(?:arrondissement|arr\.?)/i)
+              || t.match(new RegExp(`${result.city}\\s+(\\d{1,2})\\s*(?:e|er|[èeé]me|ème)?\\b`, "i"));
+    if (arrM) {
+      const n = parseInt(arrM[1], 10);
+      if (result.city === "Paris" && n >= 1 && n <= 20) {
+        result.cp = `750${String(n).padStart(2, "0")}`;
+      } else if (result.city === "Lyon" && n >= 1 && n <= 9) {
+        result.cp = `6900${n}`;
+      } else if (result.city === "Marseille" && n >= 1 && n <= 16) {
+        result.cp = `130${String(n).padStart(2, "0")}`;
+      }
+    }
   }
 
   // CHARGES COPRO : "Charges : 120 €/mois" / "Charges mensuelles : 95€"
@@ -1773,6 +1801,7 @@ function parseListing(text) {
 
 const IMPORT_FIELD_LABELS = {
   city:       "Ville",
+  cp:         "Code postal",
   type:       "Type",
   surface:    "Surface (m²)",
   floor:      "Étage",
@@ -1849,6 +1878,7 @@ function applyImportToForm() {
 
   const map = {
     city:      { id: "b-city",       set: v => $("b-city").value = v },
+    cp:        { id: "b-cp",         set: v => $("b-cp").value = v },
     type:      { id: "b-type",       set: v => $("b-type").value = v },
     surface:   { id: "b-surface",    set: v => $("b-surface").value = v },
     floor:     { id: "b-floor",      set: v => $("b-floor").value = v },
@@ -1901,6 +1931,28 @@ function init() {
     el.addEventListener("input", () => { render(); syncURL(); });
     el.addEventListener("change", () => { render(); syncURL(); });
   });
+
+  // Code postal : si Paris/Lyon/Marseille, auto-remplit la ville
+  // (utile quand l'utilisateur tape directement le CP sans passer par l'autocomplete)
+  const cpInput = $("b-cp");
+  if (cpInput) {
+    cpInput.addEventListener("input", () => {
+      const cp = cpInput.value.trim();
+      if (!/^\d{5}$/.test(cp)) return;
+      const cityField = $("b-city");
+      let cityName = null;
+      if (cp.startsWith("750") && cp >= "75001" && cp <= "75020") cityName = "Paris";
+      else if (cp.startsWith("6900") && cp >= "69001" && cp <= "69009") cityName = "Lyon";
+      else if (cp.startsWith("130") && cp >= "13001" && cp <= "13016") cityName = "Marseille";
+      if (cityName && cityField && cityField.value.trim() !== cityName) {
+        cityField.value = cityName;
+        const hint = $("city-hint");
+        if (hint && MARKET_DVF_ARR[cp]) {
+          hint.innerHTML = `<span style="color:var(--good)">● ${MARKET_DVF_ARR[cp].label} — données DVF par arrondissement</span>`;
+        }
+      }
+    });
+  }
 
   // Collapsibles
   document.querySelectorAll(".collapsible").forEach(c => {

@@ -49,7 +49,7 @@
         </button>
       </div>
 
-      <div class="grid-2">
+      <div class="grid-3">
         <div class="field">
           <label for="b-city">Ville</label>
           <div class="autocomplete">
@@ -57,6 +57,11 @@
             <div class="autocomplete-list" id="b-city-list"></div>
           </div>
           <span class="hint" id="city-hint"></span>
+        </div>
+        <div class="field">
+          <label for="b-cp">Code postal</label>
+          <input type="text" id="b-cp" inputmode="numeric" maxlength="5" placeholder="ex: 75018" autocomplete="off" />
+          <span class="hint small" id="cp-hint">Précise l'arrondissement (Paris/Lyon/Marseille)</span>
         </div>
         <div class="field">
           <label for="b-district">Quartier (optionnel)</label>

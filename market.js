@@ -41,6 +41,46 @@ const MARKET_PRECISE = {
   "Grenoble":                { priceM2: [2500, 3500], rentM2: [12, 14], tension: 4, profile: "Étudiants, ingénieurs", risk: "Encadrement loyers prévu", transports: "Tram, bus" },
 };
 
+/* ---- 1bis. Stats DVF agrégées par commune (ventes appartements 2024-2025) ----
+   Source : DVF (Demandes de Valeurs Foncières), data.gouv.fr / Etalab.
+   Calculé localement via /tmp/dvf-stats/compute.py sur les CSV bruts.
+   Filtres : Vente, Appartement, prix [30k–5M], surface [9–300m²], prix/m² [500–30000].
+   Pour Paris/Lyon/Marseille : agrégation tous arrondissements.
+   Strasbourg absent : Bas-Rhin utilise le Livre Foncier (pas de DVF).
+*/
+const MARKET_DVF = {
+  "Le Perreux-sur-Marne":  { n:  669, prixMed: 270000, m2Med: 5300, m2P25: 4452, m2P75: 6137, lastDate: "2025-12-30" },
+  "Nogent-sur-Marne":      { n:  817, prixMed: 325000, m2Med: 6029, m2P25: 5167, m2P75: 6831, lastDate: "2025-12-31" },
+  "Saint-Maur-des-Fossés": { n: 1514, prixMed: 274300, m2Med: 5309, m2P25: 4574, m2P75: 6176, lastDate: "2025-12-31" },
+  "Champigny-sur-Marne":   { n:  658, prixMed: 190000, m2Med: 3608, m2P25: 3097, m2P75: 4301, lastDate: "2025-12-31" },
+  "Bry-sur-Marne":         { n:  292, prixMed: 268000, m2Med: 4690, m2P25: 3956, m2P75: 5423, lastDate: "2025-12-31" },
+  "Villiers-sur-Marne":    { n:  433, prixMed: 199900, m2Med: 3750, m2P25: 3173, m2P75: 4400, lastDate: "2025-12-31" },
+  "Fontenay-sous-Bois":    { n:  722, prixMed: 268000, m2Med: 5628, m2P25: 4443, m2P75: 6639, lastDate: "2025-12-30" },
+  "Vincennes":             { n: 1457, prixMed: 406000, m2Med: 8571, m2P25: 7542, m2P75: 9691, lastDate: "2025-12-30" },
+  "Joinville-le-Pont":     { n:  347, prixMed: 276500, m2Med: 5484, m2P25: 4667, m2P75: 6375, lastDate: "2025-12-31" },
+  "Noisy-le-Grand":        { n:  954, prixMed: 215000, m2Med: 4305, m2P25: 3242, m2P75: 5000, lastDate: "2025-12-31" },
+  "Chelles":               { n:  577, prixMed: 178600, m2Med: 3240, m2P25: 2659, m2P75: 3944, lastDate: "2025-12-30" },
+  "Gagny":                 { n:  333, prixMed: 163300, m2Med: 3037, m2P25: 2575, m2P75: 3852, lastDate: "2025-12-30" },
+  "Neuilly-Plaisance":     { n:  279, prixMed: 181000, m2Med: 3859, m2P25: 3065, m2P75: 4778, lastDate: "2025-12-30" },
+  "Neuilly-sur-Marne":     { n:  347, prixMed: 175000, m2Med: 3022, m2P25: 2269, m2P75: 3780, lastDate: "2025-12-30" },
+  "Rosny-sous-Bois":       { n:  658, prixMed: 193975, m2Med: 3734, m2P25: 3017, m2P75: 4333, lastDate: "2025-12-30" },
+  "Bordeaux":              { n: 6741, prixMed: 210000, m2Med: 4241, m2P25: 3517, m2P75: 5094, lastDate: "2025-12-31" },
+  "Toulouse":              { n:12853, prixMed: 158000, m2Med: 3268, m2P25: 2586, m2P75: 4157, lastDate: "2025-12-31" },
+  "Lille":                 { n: 5132, prixMed: 171000, m2Med: 3797, m2P25: 3018, m2P75: 4672, lastDate: "2025-12-31" },
+  "Nantes":                { n: 7632, prixMed: 165000, m2Med: 3430, m2P25: 2830, m2P75: 4111, lastDate: "2025-12-31" },
+  "Rennes":                { n: 5521, prixMed: 180000, m2Med: 3676, m2P25: 2918, m2P75: 4401, lastDate: "2025-12-31" },
+  "Nice":                  { n:14033, prixMed: 230000, m2Med: 4833, m2P25: 3782, m2P75: 6109, lastDate: "2025-12-31" },
+  "Montpellier":           { n: 7907, prixMed: 155000, m2Med: 3382, m2P25: 2643, m2P75: 4115, lastDate: "2025-12-31" },
+  "Grenoble":              { n: 4694, prixMed: 130670, m2Med: 2524, m2P25: 1970, m2P75: 3133, lastDate: "2025-12-31" },
+  "Paris":                 { n:56072, prixMed: 398000, m2Med: 9727, m2P25: 8200, m2P75:11636, lastDate: "2025-12-31" },
+  "Lyon":                  { n:12967, prixMed: 243000, m2Med: 4492, m2P25: 3667, m2P75: 5331, lastDate: "2025-12-31" },
+  "Marseille":             { n:20461, prixMed: 170000, m2Med: 3226, m2P25: 2333, m2P75: 4262, lastDate: "2025-12-31" },
+};
+
+function getDVF(city) {
+  return city && MARKET_DVF[city] ? MARKET_DVF[city] : null;
+}
+
 /* ---- 2. Estimation par défaut (zonage Pinel + population) ---- */
 
 // Heuristique par département : prix/m² médian appartement ancien et loyer/m² nu

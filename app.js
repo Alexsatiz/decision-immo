@@ -742,6 +742,43 @@ function render() {
     $("market-bars").innerHTML = "";
   }
 
+  // DVF — Comparables réels
+  const dvf = getDVF(inp.bien.city);
+  if (dvf) {
+    $("dvf-block").hidden = false;
+    const lastDateFmt = dvf.lastDate
+      ? new Date(dvf.lastDate).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })
+      : "—";
+    $("dvf-tag").textContent = `${dvf.n.toLocaleString("fr-FR")} ventes`;
+    $("dvf-sub").textContent = `Appartements vendus en ${inp.bien.city} (DVF 2024-2025) · dernière transaction : ${lastDateFmt}`;
+    $("dvf-stats").innerHTML = `
+      <div class="dvf-kpi"><div class="dvf-kpi-label">Prix médian</div><div class="dvf-kpi-value">${fmtEUR(dvf.prixMed)}</div></div>
+      <div class="dvf-kpi"><div class="dvf-kpi-label">€/m² médian</div><div class="dvf-kpi-value">${fmtEUR(dvf.m2Med)}</div></div>
+      <div class="dvf-kpi"><div class="dvf-kpi-label">€/m² 25%–75%</div><div class="dvf-kpi-value">${fmtEUR(dvf.m2P25)} – ${fmtEUR(dvf.m2P75)}</div></div>
+    `;
+    // Positionnement du bien analysé
+    if (a.bien.surface > 0 && a.bien.price > 0) {
+      const pricePm2 = a.bien.price / a.bien.surface;
+      let pos, cls;
+      if (pricePm2 < dvf.m2P25)      { pos = "sous le marché (1er quartile)"; cls = "good"; }
+      else if (pricePm2 <= dvf.m2Med){ pos = "dans la moitié basse";           cls = "good"; }
+      else if (pricePm2 <= dvf.m2P75){ pos = "dans la moitié haute";           cls = "warn"; }
+      else                           { pos = "au-dessus du marché (4e quartile)"; cls = "bad"; }
+      const ecart = ((pricePm2 / dvf.m2Med - 1) * 100);
+      const ecartTxt = (ecart >= 0 ? "+" : "") + ecart.toFixed(1) + "% vs médiane";
+      $("dvf-position").innerHTML = `
+        <div class="dvf-pos-row ${cls}">
+          <span class="dvf-pos-label">Votre bien à ${fmtEUR(Math.round(pricePm2))} €/m²</span>
+          <span class="dvf-pos-value">${pos} · ${ecartTxt}</span>
+        </div>
+      `;
+    } else {
+      $("dvf-position").innerHTML = "";
+    }
+  } else {
+    $("dvf-block").hidden = true;
+  }
+
   // RISQUES
   const risks = buildRisks(a);
   $("risks-list").innerHTML = risks.map(r => `

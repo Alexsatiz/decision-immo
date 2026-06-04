@@ -565,6 +565,74 @@ html, body {
 .proj-kpi-value.pos { color: var(--good); }
 .proj-kpi-value.neg { color: var(--bad); }
 
+/* OPTIMAL SELL YEAR */
+.optsell-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 700px) {
+  .optsell-grid { grid-template-columns: 1fr; }
+}
+.optsell-scenario {
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  border-top: 3px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.optsell-scenario.pess { border-top-color: var(--bad);  color: var(--bad);  }
+.optsell-scenario.med  { border-top-color: var(--warn); color: var(--warn); }
+.optsell-scenario.opt  { border-top-color: var(--good); color: var(--good); }
+
+.optsell-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  color: var(--text);
+}
+.optsell-name { font-size: 13px; font-weight: 700; letter-spacing: -0.005em; }
+.optsell-rate {
+  font-size: 11px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.optsell-best {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 8px; padding: 8px 0;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  color: var(--text);
+}
+.optsell-best > div, .optsell-best-tri { display: flex; flex-direction: column; gap: 2px; }
+.optsell-best-tri { text-align: right; }
+.optsell-best-label {
+  font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+}
+.optsell-best-year {
+  font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.optsell-best-value {
+  font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums;
+  letter-spacing: -0.005em;
+}
+.optsell-best-value.pos { color: var(--good); }
+.optsell-best-value.neg { color: var(--bad); }
+
+.optsell-spark {
+  width: 100%; height: 60px; display: block;
+}
+.optsell-axis {
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.optsell-empty {
+  text-align: center; padding: 16px 0;
+  font-size: 12px; color: var(--text-muted);
+}
+
 /* DVF */
 .dvf-block {
   margin-top: 18px;

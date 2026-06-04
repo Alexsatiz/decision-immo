@@ -266,6 +266,33 @@ function buildProjection(a, horizonYears, growthPct) {
   return { growthPct, projectedValue, balance, netWealth, grossGain, cumCF, tri };
 }
 
+/* TRI(N) pour chaque N entre 1 et maxYears, à taux de croissance fixé.
+   Utilisé pour identifier l'année de revente optimale. */
+function buildTriSeries(a, growthPct, maxYears = 30) {
+  const g = growthPct / 100;
+  const amort = buildAmort(a.toBorrow, a.loan.rate, a.loan.duration, a.loanComp, a.loan.deferred);
+  const initialOutflow = a.loan.apport + (a.loan.borrowNotaire ? 0 : a.fraisNotaire);
+  const valueBase = a.bien.price * annexBonus(a.bien, "value");
+
+  // Pré-calcul des cash-flows annuels (sans la vente terminale)
+  const baseFlows = [-initialOutflow];
+  for (let y = 1; y <= maxYears; y++) {
+    const monthlyPay = paymentForYear(y, a.loanComp, a.loan);
+    baseFlows.push((a.rentNetMonthly - monthlyPay) * 12);
+  }
+
+  // Pour chaque N, ajouter la vente terminale au flow de l'année N et calculer le TRI
+  const series = [];
+  for (let N = 1; N <= maxYears; N++) {
+    const flows = baseFlows.slice(0, N + 1);
+    const projectedValue = valueBase * Math.pow(1 + g, N);
+    const balance = remainingBalance(amort, N);
+    flows[N] += projectedValue - balance;
+    series.push({ year: N, tri: irr(flows) });
+  }
+  return series;
+}
+
 /* ============================================================
    ANALYSE FINANCIÈRE
    ============================================================ */
@@ -825,6 +852,65 @@ function render() {
     `;
   }).join("");
 
+  // ANNÉE DE REVENTE OPTIMALE
+  $("optsell-grid").innerHTML = scenarios.map(s => {
+    const series = buildTriSeries(a, s.g, 30);
+    const valid = series.filter(x => x.tri !== null && isFinite(x.tri));
+    if (!valid.length) {
+      return `
+        <div class="optsell-scenario ${s.key}">
+          <div class="optsell-head">
+            <span class="optsell-name">${s.label}</span>
+            <span class="optsell-rate">+${s.g}% / an</span>
+          </div>
+          <div class="optsell-empty">TRI indéterminé sur la période</div>
+        </div>
+      `;
+    }
+    const best = valid.reduce((acc, x) => (x.tri > acc.tri ? x : acc));
+    const tris = valid.map(x => x.tri);
+    const triMin = Math.min(...tris, 0);
+    const triMax = Math.max(...tris, best.tri);
+    const range = (triMax - triMin) || 1;
+
+    // SVG sparkline 240x60, marge 4px en haut/bas
+    const W = 240, H = 60, M = 4;
+    const xAt = y => ((y - 1) / 29) * W;
+    const yAt = tri => H - M - ((tri - triMin) / range) * (H - 2 * M);
+    const points = series.map(s2 => {
+      if (s2.tri === null || !isFinite(s2.tri)) return null;
+      return `${xAt(s2.year).toFixed(1)},${yAt(s2.tri).toFixed(1)}`;
+    }).filter(Boolean).join(" ");
+    const zeroY = triMin <= 0 && triMax >= 0 ? yAt(0).toFixed(1) : null;
+    const bestX = xAt(best.year).toFixed(1);
+    const bestY = yAt(best.tri).toFixed(1);
+
+    return `
+      <div class="optsell-scenario ${s.key}">
+        <div class="optsell-head">
+          <span class="optsell-name">${s.label}</span>
+          <span class="optsell-rate">+${s.g}% / an</span>
+        </div>
+        <div class="optsell-best">
+          <div>
+            <div class="optsell-best-label">Année optimale</div>
+            <div class="optsell-best-year">An ${best.year}</div>
+          </div>
+          <div class="optsell-best-tri">
+            <div class="optsell-best-label">TRI maximal</div>
+            <div class="optsell-best-value ${best.tri >= 5 ? "pos" : best.tri >= 0 ? "" : "neg"}">${fmtPct(best.tri)}</div>
+          </div>
+        </div>
+        <svg class="optsell-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          ${zeroY !== null ? `<line x1="0" y1="${zeroY}" x2="${W}" y2="${zeroY}" stroke="var(--border-strong)" stroke-dasharray="3,3" stroke-width="1"/>` : ""}
+          <polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${points}"/>
+          <circle cx="${bestX}" cy="${bestY}" r="3.5" fill="currentColor"/>
+        </svg>
+        <div class="optsell-axis"><span>An 1</span><span>An 15</span><span>An 30</span></div>
+      </div>
+    `;
+  }).join("");
+
   // AMORTISSEMENT
   const amort = buildAmort(a.toBorrow, inp.loan.rate, inp.loan.duration, a.loanComp, inp.loan.deferred);
   $("amort-tbody").innerHTML = amort.map(r => `
@@ -847,11 +933,11 @@ function showEmpty() {
       <p>Renseignez au minimum la <strong>ville</strong>, la <strong>surface</strong> et le <strong>prix</strong> pour générer l'analyse.</p>
     </div>
   `;
-  ["kpi-block", "finance-block", "projection-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = true);
+  ["kpi-block", "finance-block", "projection-block", "optsell-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = true);
 }
 
 function showAll() {
-  ["kpi-block", "finance-block", "projection-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = false);
+  ["kpi-block", "finance-block", "projection-block", "optsell-block", "market-block", "risks-block", "opti-block", "amort-block"].forEach(id => $(id).hidden = false);
 }
 
 /* ============================================================

@@ -1209,6 +1209,147 @@ function copyShareLink(btn) {
 }
 
 /* ============================================================
+   EXPORT PDF (html2canvas + jsPDF)
+   ============================================================ */
+
+async function exportPDF(btn) {
+  if (typeof html2canvas !== "function" || !window.jspdf) {
+    alert("Bibliothèques PDF non chargées. Vérifiez votre connexion.");
+    return;
+  }
+  const verdictEmpty = document.querySelector("#verdict .verdict-empty");
+  if (verdictEmpty) {
+    alert("Saisissez d'abord les informations du bien.");
+    return;
+  }
+
+  const label = btn.querySelector(".btn-share-label");
+  const originalLabel = label ? label.textContent : "";
+  if (label) label.textContent = "Génération…";
+  btn.disabled = true;
+
+  // Déplier tous les .collapsible et garder leur état initial
+  const collapsibles = Array.from(document.querySelectorAll(".collapsible"));
+  const wasOpen = collapsibles.map(c => c.classList.contains("open"));
+  collapsibles.forEach(c => c.classList.add("open"));
+
+  // Désactiver temporairement le sticky header pour la capture
+  const header = document.querySelector(".site-header");
+  const headerSticky = header ? header.style.position : null;
+  if (header) header.style.position = "static";
+
+  // Petit délai pour laisser le navigateur appliquer les changements
+  await new Promise(r => setTimeout(r, 50));
+
+  const target = document.querySelector(".col-output");
+  let canvas;
+  try {
+    canvas = await html2canvas(target, {
+      backgroundColor: "#f6f5f0",
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      windowWidth: target.scrollWidth,
+    });
+  } catch (e) {
+    console.error(e);
+    alert("Échec de la génération du PDF : " + e.message);
+    collapsibles.forEach((c, i) => { if (!wasOpen[i]) c.classList.remove("open"); });
+    if (header && headerSticky !== null) header.style.position = headerSticky;
+    if (label) label.textContent = originalLabel;
+    btn.disabled = false;
+    return;
+  }
+
+  // Restaurer l'état initial
+  collapsibles.forEach((c, i) => { if (!wasOpen[i]) c.classList.remove("open"); });
+  if (header && headerSticky !== null) header.style.position = headerSticky;
+
+  // Construire le PDF A4 portrait : 210 × 297 mm, marges 10 mm
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  const pageW = 210, pageH = 297, margin = 10;
+  const usableW = pageW - 2 * margin;
+
+  // En-tête
+  const city = $("b-city").value || "—";
+  const surface = $("b-surface").value || "—";
+  const price = $("b-price").value || "—";
+  const today = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(16);
+  pdf.text("Décision Immo — Analyse d'investissement", margin, margin + 6);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  pdf.setTextColor(100);
+  const subtitle = `${city}${surface !== "—" ? ` · ${surface} m²` : ""}${price !== "—" ? ` · ${Number(price).toLocaleString("fr-FR")} €` : ""} · Édité le ${today}`;
+  pdf.text(subtitle, margin, margin + 12);
+  pdf.setTextColor(0);
+
+  // Calcul des dimensions de l'image
+  const imgRatio = canvas.height / canvas.width;
+  const imgW = usableW;
+  const imgH = imgW * imgRatio;
+  const startY = margin + 18;
+  const availH = pageH - startY - margin;
+
+  const imgData = canvas.toDataURL("image/jpeg", 0.92);
+
+  if (imgH <= availH) {
+    pdf.addImage(imgData, "JPEG", margin, startY, imgW, imgH);
+  } else {
+    // Pagination : on découpe l'image source en tranches
+    const pxPerMm = canvas.width / imgW;
+    const sliceHeightPx = availH * pxPerMm;
+    let yOffset = 0;
+    let pageIdx = 0;
+    while (yOffset < canvas.height) {
+      const sliceH = Math.min(sliceHeightPx, canvas.height - yOffset);
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = sliceH;
+      slice.getContext("2d").drawImage(canvas, 0, yOffset, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+      const sliceData = slice.toDataURL("image/jpeg", 0.92);
+      const sliceMm = sliceH / pxPerMm;
+      if (pageIdx > 0) {
+        pdf.addPage();
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(9);
+        pdf.setTextColor(150);
+        pdf.text(`${city} · suite p.${pageIdx + 1}`, margin, margin);
+        pdf.setTextColor(0);
+        pdf.addImage(sliceData, "JPEG", margin, margin + 4, imgW, sliceMm);
+      } else {
+        pdf.addImage(sliceData, "JPEG", margin, startY, imgW, sliceMm);
+      }
+      yOffset += sliceH;
+      pageIdx++;
+    }
+  }
+
+  // Pied de page sur la dernière page
+  const pageCount = pdf.internal.getNumberOfPages();
+  pdf.setPage(pageCount);
+  pdf.setFont("helvetica", "italic");
+  pdf.setFontSize(8);
+  pdf.setTextColor(140);
+  pdf.text("Outil d'aide à la décision · Calculs indicatifs · Ne constitue pas un conseil en investissement.", margin, pageH - 5);
+
+  const safeCity = city.replace(/[^a-zA-Z0-9-]/g, "_");
+  const filename = `decision-immo_${safeCity}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  pdf.save(filename);
+
+  if (label) label.textContent = "Téléchargé !";
+  btn.classList.add("copied");
+  setTimeout(() => {
+    btn.classList.remove("copied");
+    if (label) label.textContent = originalLabel;
+    btn.disabled = false;
+  }, 1500);
+}
+
+/* ============================================================
    INIT
    ============================================================ */
 
@@ -1234,6 +1375,10 @@ function init() {
   // Bouton de partage
   const shareBtn = $("btn-share");
   if (shareBtn) shareBtn.addEventListener("click", () => copyShareLink(shareBtn));
+
+  // Bouton export PDF
+  const pdfBtn = $("btn-pdf");
+  if (pdfBtn) pdfBtn.addEventListener("click", () => exportPDF(pdfBtn));
 
   setupAutocomplete();
   render();
